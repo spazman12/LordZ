@@ -1,0 +1,12 @@
+lordz.settings.json
+lordz.discord.json
+lordz-crash.log
+lordz-startup.log
+steamcmd/
+Generated/*
+!Generated/README.txt
+Release/
+backend/steam-qr-server/node_modules/
+Tools/_out.txt
+Tools/_err.txt
+*.zip

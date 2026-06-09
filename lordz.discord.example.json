@@ -1,0 +1,8 @@
+{
+  "InviteUrl": "https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=309237713920&scope=bot",
+  "WebhookUrl": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+  "BotToken": "YOUR_BOT_TOKEN",
+  "HelpChannelId": "1512803441637064794",
+  "ChannelLabel": "#lordz-mirror-app-help-channel",
+  "SupportLabel": "Support"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "lordz-steam-qr-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Temporary local Steam QR auth backend for LordZ debugging",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "steam-session": "^1.9.4"
+  }
+}

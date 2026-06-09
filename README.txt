@@ -2,16 +2,32 @@
   LORDZ - Deadside Workshop Mirror Tool
 ================================================================================
 
-GETTING STARTED (3 STEPS)
--------------------------
+INSTALL (NO INSTALLER NEEDED)
+-----------------------------
 
-  1. Double-click:  LordZ - Start Here.bat
+  1. Download from GitHub:
+       https://github.com/spazman12/LordZ/releases
+       (grab the latest LordZ-*.zip)
 
-  2. In the app:
+  2. Right-click the zip -> Extract All
+       Put it anywhere (e.g. Desktop\LordZ or C:\LordZ)
+
+  3. Open the folder and double-click:
+       LordZ - Start Here.bat
+
+  Optional: run Create Desktop Shortcut.bat for a desktop icon.
+
+
+FIRST-TIME SETUP (3 STEPS)
+--------------------------
+
+  1. In the app:
        - Click "Download & Install SteamCMD" (one time only)
        - Enter your Steam username
        - App ID 895400 is pre-filled for Deadside - click Verify
-       - Add source mod IDs to the Mirror Queue
+       - (Other Workshop games: change App ID and Verify)
+
+  2. Add source mod IDs to the Mirror Queue
 
   3. Click "Generate Script", then "Run Script"
        - A PowerShell window opens

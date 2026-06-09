@@ -57,19 +57,48 @@ Built for **Deadside** dedicated server hosts (`App ID 895400`), with a workflow
 
 ---
 
-## Quick start
+## Installation
 
-1. **Download** — clone this repo or grab a release zip from `Release\` (run `.\Pack-LordZ.ps1` to build one)
-2. **Launch** — double-click **`LordZ - Start Here.bat`**
-3. **Setup** (one time):
-   - Click **Download & Install SteamCMD**
-   - Enter your **Steam username**
-   - Click **Verify** on App ID `895400` (Deadside)
-4. **Mirror**:
-   - Add **Source Mod ID(s)** to the queue
-   - Click **Generate Script**
-   - Click **Run Script** → enter Steam password in the PowerShell window
-   - Approve **Steam Guard** on your phone when prompted
+No installer required. LordZ is portable — unzip and run.
+
+### Option A — Download release zip (recommended)
+
+1. Go to **[github.com/spazman12/LordZ/releases](https://github.com/spazman12/LordZ/releases)**
+2. Download the latest **`LordZ-*.zip`**
+3. Right-click the zip → **Extract All**
+4. Pick a folder (e.g. `C:\LordZ` or `Desktop\LordZ`)
+5. Open the extracted folder and double-click **`LordZ - Start Here.bat`**
+
+### Option B — Clone from GitHub
+
+```powershell
+git clone https://github.com/spazman12/LordZ.git
+cd LordZ
+```
+
+Then double-click **`LordZ - Start Here.bat`**.
+
+### Optional — desktop shortcut
+
+Run **`Create Desktop Shortcut.bat`** inside the LordZ folder.
+
+### First-time setup (inside the app)
+
+1. Click **Download & Install SteamCMD** (one time — installs to `.\steamcmd\`)
+2. Enter your **Steam username**
+3. Enter your game's **App ID** (Deadside `895400` is pre-filled) and click **Verify**
+4. Add **Source Mod ID(s)** to the Mirror Queue
+5. Click **Generate Script**, then **Run Script**
+6. Enter your Steam password in the PowerShell window that opens
+7. Approve **Steam Guard** on your phone when prompted
+
+Your settings save automatically to `lordz.settings.json` beside the app.
+
+### Troubleshooting
+
+- **App won't open?** Run `Start-LordZ-Debug.bat` instead — it shows error messages in a console window.
+- **Windows SmartScreen warning?** Click **More info** → **Run anyway** (LordZ is an unsigned community tool).
+- **Using another Workshop game?** Change the App ID, click Verify, then queue mods from that game's Workshop.
 
 Plain-text instructions also live in [`README.txt`](README.txt).
 
@@ -79,7 +108,7 @@ Plain-text instructions also live in [`README.txt`](README.txt).
 
 - Windows 10 or 11
 - PowerShell 5.1 (included with Windows)
-- Steam account that owns **Deadside**
+- Steam account that owns the game you are mirroring mods for
 - Internet connection
 
 ---

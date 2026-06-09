@@ -15,7 +15,9 @@ Follow the prompts (browser login is easiest).
 ```powershell
 cd "C:\Users\Moot\Documents\LOrdz"
 
-gh repo create LordZ --public --source=. --remote=origin --push --description "Tired of mod updates forcing dedi restarts? Mirror Deadside Steam Workshop mods on your schedule."
+gh repo create LordZ --public --source=. --remote=origin --push --description "Tired of mod updates forcing dedi restarts? Mirror Steam Workshop mods on your schedule."
+
+Repo URL: https://github.com/spazman12/LordZ
 ```
 
 Use a different name if `LordZ` is taken on your account.

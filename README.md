@@ -61,10 +61,10 @@ Built for **Deadside** dedicated server hosts (`App ID 895400`), with a workflow
 
 No installer required. LordZ is portable — unzip and run.
 
-### Option A — Download release zip (recommended)
+### Windows — Download release zip (recommended)
 
 1. Go to **[github.com/spazman12/LordZ/releases](https://github.com/spazman12/LordZ/releases)**
-2. Download the latest **`LordZ-*.zip`**
+2. Download the latest **`LordZ-windows-*.zip`**
 3. Right-click the zip → **Extract All**
 4. Pick a folder (e.g. `C:\LordZ` or `Desktop\LordZ`)
 5. Open the extracted folder and double-click **`LordZ - Start Here.bat`**
@@ -102,12 +102,31 @@ Your settings save automatically to `lordz.settings.json` beside the app.
 
 Plain-text instructions also live in [`README.txt`](README.txt).
 
+### Linux / macOS — CLI version
+
+The Windows GUI does not run on Linux. Use the **terminal CLI** instead:
+
+1. Download **`LordZ-linux-*.zip`** from [Releases](https://github.com/spazman12/LordZ/releases)
+2. `unzip LordZ-linux-*.zip -d ~/LordZ && cd ~/LordZ`
+3. Install PowerShell 7: `sudo apt-get install -y powershell` (Ubuntu/Debian)
+4. Install SteamCMD deps: `sudo apt-get install -y lib32gcc-s1 lib32stdc++6 libc6-i386 curl tar`
+5. `chmod +x lordz.sh && ./lordz.sh`
+
+See [`README-Linux.txt`](README-Linux.txt) for the full menu walkthrough.
+
 ---
 
 ## Requirements
 
+**Windows**
 - Windows 10 or 11
 - PowerShell 5.1 (included with Windows)
+
+**Linux / macOS**
+- PowerShell 7+ (`pwsh`)
+- 32-bit libs for SteamCMD on Linux (`lib32gcc-s1`, `lib32stdc++6`, `libc6-i386`)
+
+**All platforms**
 - Steam account that owns the game you are mirroring mods for
 - Internet connection
 

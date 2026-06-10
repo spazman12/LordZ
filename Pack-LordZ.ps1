@@ -1,9 +1,13 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Build a clean LordZ zip for distribution.
+    Build clean LordZ zip packages for distribution.
+.PARAMETER Platform
+    Windows, Linux, or Both
 #>
 param(
+    [ValidateSet('Windows', 'Linux', 'Both')]
+    [string]$Platform = 'Both',
     [string]$OutputDir = '',
     [string]$Version = ''
 )
@@ -19,101 +23,121 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-Date -Format 'yyyyMMdd'
 }
 
-$stageName = "LordZ-$Version"
-$stageRoot = Join-Path $env:TEMP $stageName
-$zipPath = Join-Path $OutputDir "$stageName.zip"
-
-$includeFiles = @(
-    'LordZ - Start Here.bat'
-    'Start-LordZ.bat'
-    'Start-LordZ-Debug.bat'
-    'Create Desktop Shortcut.bat'
-    'README.txt'
-    'LordZ-MirrorEngine.ps1'
-    'lordz.settings.example.json'
-    'lordz.discord.example.json'
-)
-
 $discordConfigPath = Join-Path $installRoot 'lordz.discord.json'
 $bundleDiscordConfig = Test-Path -LiteralPath $discordConfigPath
 
-$includeDirs = @(
-    'Assets'
-    'Generated'
-    'Modules'
-    'Tools\New-LordZDesktopShortcut.ps1'
-)
+function New-LordZReleaseZip {
+    param(
+        [string]$TargetPlatform,
+        [string]$StageName,
+        [string]$ZipPath
+    )
 
-if (Test-Path -LiteralPath $stageRoot) {
-    Remove-Item -LiteralPath $stageRoot -Recurse -Force
-}
+    $stageRoot = Join-Path $env:TEMP $StageName
 
-New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
-New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    $commonFiles = @(
+        'README.txt'
+        'LordZ-MirrorEngine.ps1'
+        'lordz.settings.example.json'
+        'lordz.discord.example.json'
+    )
 
-foreach ($relativePath in $includeFiles) {
-    $source = Join-Path $installRoot $relativePath
-    if (-not (Test-Path -LiteralPath $source)) {
-        throw "Missing required file: $relativePath"
+    $commonDirs = @(
+        'Assets'
+        'Generated'
+        'Modules'
+    )
+
+    $windowsFiles = @(
+        'LordZ - Start Here.bat'
+        'Start-LordZ.bat'
+        'Start-LordZ-Debug.bat'
+        'Create Desktop Shortcut.bat'
+        'Tools\New-LordZDesktopShortcut.ps1'
+    )
+
+    $linuxFiles = @(
+        'lordz.sh'
+        'LordZ-MirrorCli.ps1'
+        'README-Linux.txt'
+    )
+
+    if (Test-Path -LiteralPath $stageRoot) {
+        Remove-Item -LiteralPath $stageRoot -Recurse -Force
     }
 
-    $target = Join-Path $stageRoot $relativePath
-    $targetDir = Split-Path -Parent $target
-    if (-not (Test-Path -LiteralPath $targetDir)) {
-        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-    }
+    New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
 
-    Copy-Item -LiteralPath $source -Destination $target -Force
-}
+    $files = $commonFiles
+    if ($TargetPlatform -eq 'Windows') { $files += $windowsFiles }
+    if ($TargetPlatform -eq 'Linux') { $files += $linuxFiles }
 
-foreach ($relativePath in $includeDirs) {
-    $source = Join-Path $installRoot $relativePath
-    if (-not (Test-Path -LiteralPath $source)) {
-        throw "Missing required path: $relativePath"
-    }
+    foreach ($relativePath in $files) {
+        $source = Join-Path $installRoot $relativePath
+        if (-not (Test-Path -LiteralPath $source)) {
+            throw "Missing required file for ${TargetPlatform}: $relativePath"
+        }
 
-    $target = Join-Path $stageRoot $relativePath
-    if (Test-Path -LiteralPath $source -PathType Leaf) {
+        $target = Join-Path $stageRoot $relativePath
         $targetDir = Split-Path -Parent $target
         if (-not (Test-Path -LiteralPath $targetDir)) {
             New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
         }
+
         Copy-Item -LiteralPath $source -Destination $target -Force
-        continue
     }
 
-    Copy-Item -LiteralPath $source -Destination $target -Recurse -Force
+    foreach ($relativePath in $commonDirs) {
+        $source = Join-Path $installRoot $relativePath
+        if (-not (Test-Path -LiteralPath $source)) {
+            throw "Missing required path: $relativePath"
+        }
+
+        $target = Join-Path $stageRoot $relativePath
+        Copy-Item -LiteralPath $source -Destination $target -Recurse -Force
+    }
+
+    if ($bundleDiscordConfig) {
+        Copy-Item -LiteralPath $discordConfigPath -Destination (Join-Path $stageRoot 'lordz.discord.json') -Force
+        Write-Host "[*] $TargetPlatform : bundled lordz.discord.json"
+    }
+    else {
+        Write-Host "[!] $TargetPlatform : lordz.discord.json not found - Discord may be inactive"
+    }
+
+    Get-ChildItem -LiteralPath (Join-Path $stageRoot 'Generated') -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne 'README.txt' } |
+        Remove-Item -Force
+
+    if (Test-Path -LiteralPath $ZipPath) {
+        Remove-Item -LiteralPath $ZipPath -Force
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($stageRoot, $ZipPath)
+    Remove-Item -LiteralPath $stageRoot -Recurse -Force
+
+    return $ZipPath
 }
 
-# Ship live Discord support config in release zips (not committed to git).
-if ($bundleDiscordConfig) {
-    Copy-Item -LiteralPath $discordConfigPath -Destination (Join-Path $stageRoot 'lordz.discord.json') -Force
-    Write-Host '[*] Bundled lordz.discord.json for Live Help Chat + Quick Request.'
-}
-else {
-    Write-Host '[!] lordz.discord.json not found - release users will need to configure Discord manually.'
-}
+New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
-# Strip dev-only generated scripts from the distributable copy.
-Get-ChildItem -LiteralPath (Join-Path $stageRoot 'Generated') -File |
-    Where-Object { $_.Name -ne 'README.txt' } |
-    Remove-Item -Force
-
-if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath -Force
+$built = @()
+if ($Platform -eq 'Windows' -or $Platform -eq 'Both') {
+    $zip = Join-Path $OutputDir "LordZ-windows-$Version.zip"
+    [void](New-LordZReleaseZip -TargetPlatform 'Windows' -StageName "LordZ-windows-$Version" -ZipPath $zip)
+    $built += $zip
 }
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($stageRoot, $zipPath)
-
-Remove-Item -LiteralPath $stageRoot -Recurse -Force
+if ($Platform -eq 'Linux' -or $Platform -eq 'Both') {
+    $zip = Join-Path $OutputDir "LordZ-linux-$Version.zip"
+    [void](New-LordZReleaseZip -TargetPlatform 'Linux' -StageName "LordZ-linux-$Version" -ZipPath $zip)
+    $built += $zip
+}
 
 Write-Host ''
-Write-Host '[OK] LordZ release package ready:'
-Write-Host "     $zipPath"
-Write-Host ''
-Write-Host 'Give users these instructions:'
-Write-Host '  1. Unzip anywhere (e.g. Desktop\LordZ)'
-Write-Host '  2. Double-click "LordZ - Start Here.bat"'
-Write-Host '  3. Follow the Quick Start popup'
+Write-Host '[OK] LordZ release package(s) ready:'
+foreach ($path in $built) {
+    Write-Host "     $path"
+}
 Write-Host ''

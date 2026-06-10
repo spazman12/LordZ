@@ -88,19 +88,44 @@ function Write-LordZPipelineLog {
     }
 }
 
+function Get-LordZPlatform {
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        if ($IsLinux) { return 'Linux' }
+        if ($IsMacOS) { return 'MacOS' }
+        if ($IsWindows) { return 'Windows' }
+    }
+
+    if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [System.Runtime.InteropServices.OSPlatform]::Linux)) {
+        return 'Linux'
+    }
+    if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [System.Runtime.InteropServices.OSPlatform]::OSX)) {
+        return 'MacOS'
+    }
+
+    return 'Windows'
+}
+
+function Get-LordZSteamCmdExecutableName {
+    if ((Get-LordZPlatform) -eq 'Linux') { return 'steamcmd.sh' }
+    return 'steamcmd.exe'
+}
+
 function Test-LordZSteamCmdPath {
     param([Parameter(Mandatory)][string]$SteamCmdPath)
 
+    $label = Get-LordZSteamCmdExecutableName
     if (-not (Test-Path -LiteralPath $SteamCmdPath)) {
         return [PSCustomObject]@{
             Valid   = $false
-            Message = "steamcmd.exe not found at: $SteamCmdPath"
+            Message = "$label not found at: $SteamCmdPath"
         }
     }
 
     return [PSCustomObject]@{
         Valid   = $true
-        Message = 'steamcmd.exe located.'
+        Message = "$label located."
     }
 }
 
@@ -111,21 +136,50 @@ function Get-LordZSteamCmdInstallDir {
 
 function Get-LordZSteamCmdInstallPath {
     param([Parameter(Mandatory)][string]$InstallRoot)
-    return Join-Path (Get-LordZSteamCmdInstallDir -InstallRoot $InstallRoot) 'steamcmd.exe'
+    return Join-Path (Get-LordZSteamCmdInstallDir -InstallRoot $InstallRoot) (Get-LordZSteamCmdExecutableName)
+}
+
+function Set-LordZSteamCmdExecutable {
+    param([Parameter(Mandatory)][string]$SteamCmdPath)
+
+    if ((Get-LordZPlatform) -ne 'Linux') { return }
+    if (-not (Test-Path -LiteralPath $SteamCmdPath)) { return }
+
+    try {
+        & chmod '+x' $SteamCmdPath 2>$null
+    }
+    catch { }
 }
 
 function Install-LordZSteamCmd {
     param(
         [Parameter(Mandatory)][string]$InstallRoot,
-        [string]$DownloadUrl = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip',
+        [string]$DownloadUrl = '',
         [switch]$SkipBootstrap,
         [scriptblock]$OnLogLine,
         $ProgressSender
     )
 
+    $platform = Get-LordZPlatform
     $targetDir = Get-LordZSteamCmdInstallDir -InstallRoot $InstallRoot
-    $steamCmdPath = Join-Path $targetDir 'steamcmd.exe'
-    $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) 'lordz_steamcmd_install.zip'
+    $steamCmdPath = Get-LordZSteamCmdInstallPath -InstallRoot $InstallRoot
+    $steamLabel = Get-LordZSteamCmdExecutableName
+
+    if ([string]::IsNullOrWhiteSpace($DownloadUrl)) {
+        if ($platform -eq 'Linux') {
+            $DownloadUrl = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz'
+        }
+        else {
+            $DownloadUrl = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip'
+        }
+    }
+
+    $archivePath = if ($platform -eq 'Linux') {
+        Join-Path ([System.IO.Path]::GetTempPath()) 'lordz_steamcmd_install.tar.gz'
+    }
+    else {
+        Join-Path ([System.IO.Path]::GetTempPath()) 'lordz_steamcmd_install.zip'
+    }
 
     try {
         Write-LordZPipelineLog -Line '[*] Preparing SteamCMD install directory...' -ProgressSender $ProgressSender
@@ -152,26 +206,35 @@ function Install-LordZSteamCmd {
         catch { }
 
         try {
-            Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+            Invoke-WebRequest -Uri $DownloadUrl -OutFile $archivePath -UseBasicParsing -ErrorAction Stop
         }
         finally {
             [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
         }
 
-        if (-not (Test-Path -LiteralPath $zipPath)) {
+        if (-not (Test-Path -LiteralPath $archivePath)) {
             throw 'SteamCMD download did not produce an archive file.'
         }
 
-        Write-LordZPipelineLog -Line '[*] Built-in extractor deploying steamcmd.zip payload...' -ProgressSender $ProgressSender
-
-        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
-        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $targetDir)
-
-        if (-not (Test-Path -LiteralPath $steamCmdPath)) {
-            throw "steamcmd.exe was not found after extraction. Expected: $steamCmdPath"
+        if ($platform -eq 'Linux') {
+            Write-LordZPipelineLog -Line '[*] Extracting steamcmd_linux.tar.gz...' -ProgressSender $ProgressSender
+            & tar -xf $archivePath -C $targetDir
+            if ($LASTEXITCODE -ne 0) {
+                throw "tar failed with exit code $LASTEXITCODE while extracting SteamCMD."
+            }
+        }
+        else {
+            Write-LordZPipelineLog -Line '[*] Built-in extractor deploying steamcmd.zip payload...' -ProgressSender $ProgressSender
+            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($archivePath, $targetDir)
         }
 
-        Write-LordZPipelineLog -Line '[OK] Archive extracted. steamcmd.exe is present on disk.' -ProgressSender $ProgressSender
+        if (-not (Test-Path -LiteralPath $steamCmdPath)) {
+            throw "$steamLabel was not found after extraction. Expected: $steamCmdPath"
+        }
+
+        Set-LordZSteamCmdExecutable -SteamCmdPath $steamCmdPath
+        Write-LordZPipelineLog -Line "[OK] Archive extracted. $steamLabel is present on disk." -ProgressSender $ProgressSender
 
         if (-not $SkipBootstrap) {
             Write-LordZPipelineLog -Line '[*] Running first-time SteamCMD bootstrap (+quit)...' -ProgressSender $ProgressSender
@@ -179,7 +242,7 @@ function Install-LordZSteamCmd {
 
             $bootstrap = Invoke-LordZSteamCmdScript -SteamCmdPath $steamCmdPath -ScriptLines @('quit') -OnLogLine $OnLogLine -ProgressSender $ProgressSender
             if ($bootstrap.ExitCode -ne 0) {
-                Write-LordZPipelineLog -Line "[!] Bootstrap finished with exit code $($bootstrap.ExitCode). steamcmd.exe is still installed." -ProgressSender $ProgressSender
+                Write-LordZPipelineLog -Line "[!] Bootstrap finished with exit code $($bootstrap.ExitCode). $steamLabel is still installed." -ProgressSender $ProgressSender
             }
         }
 
@@ -202,8 +265,8 @@ function Install-LordZSteamCmd {
         }
     }
     finally {
-        if (Test-Path -LiteralPath $zipPath) {
-            Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $archivePath) {
+            Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -392,15 +455,39 @@ function Find-LordZPreviewImage {
     return $null
 }
 
+function Get-LordZBundledPlaceholderPath {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+
+    $candidate = Join-Path $InstallRoot 'Assets\LordZ-Placeholder.png'
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+
+    $candidate = Join-Path $InstallRoot 'Assets/LordZ-Placeholder.png'
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+
+    return $null
+}
+
 function New-LordZPlaceholderPreview {
     param(
         [Parameter(Mandatory)][string]$TargetPath,
-        [Parameter(Mandatory)][string]$MirrorName
+        [Parameter(Mandatory)][string]$MirrorName,
+        [string]$InstallRoot = ''
     )
 
     $dir = Split-Path -Parent $TargetPath
     if (-not (Test-Path -LiteralPath $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    if ((Get-LordZPlatform) -ne 'Windows') {
+        $bundled = $null
+        if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) {
+            $bundled = Get-LordZBundledPlaceholderPath -InstallRoot $InstallRoot
+        }
+        if ($bundled) {
+            Copy-Item -LiteralPath $bundled -Destination $TargetPath -Force
+            return $TargetPath
+        }
     }
 
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
@@ -697,14 +784,25 @@ function Invoke-LordZSteamCmdScript {
     try {
         Write-LordZUtf8NoBom -Path $queuePath -Lines $ScriptLines
 
+        Set-LordZSteamCmdExecutable -SteamCmdPath $SteamCmdPath
+
         $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = $SteamCmdPath
-        $psi.Arguments = "+runscript `"$queuePath`""
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.CreateNoWindow = $true
         $psi.WorkingDirectory = $scriptDir
+
+        if ((Get-LordZPlatform) -eq 'Linux') {
+            $psi.FileName = '/bin/bash'
+            $escapedQueue = $queuePath -replace "'", "'\\''"
+            $escapedSteam = $SteamCmdPath -replace "'", "'\\''"
+            $psi.Arguments = "-lc 'cd ''$scriptDir'' && ''$escapedSteam'' +runscript ''$escapedQueue'''"
+        }
+        else {
+            $psi.FileName = $SteamCmdPath
+            $psi.Arguments = "+runscript `"$queuePath`""
+        }
 
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $psi
@@ -1156,7 +1254,8 @@ function Build-LordZMirrorBatchScript {
 
         $preview = Find-LordZPreviewImage -ContentFolder $contentPath
         if (-not $preview) {
-            $preview = New-LordZPlaceholderPreview -TargetPath (Join-Path $itemRoot 'preview.png') -MirrorName $mirrorName
+            $lordzRoot = Split-Path -Parent $SteamCmdDir
+            $preview = New-LordZPlaceholderPreview -TargetPath (Join-Path $itemRoot 'preview.png') -MirrorName $mirrorName -InstallRoot $lordzRoot
             Write-LordZPipelineLog -Line "    -> Generated placeholder preview for '$mirrorName'." -ProgressSender $ProgressSender
         }
 
@@ -1249,80 +1348,151 @@ function New-LordZMirrorRunPackage {
 
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $batchPath = Join-Path $genDir "lordz_mirror_$stamp.txt"
-    $runnerPath = Join-Path $genDir "LordZ-Mirror-$stamp.ps1"
+    $platform = Get-LordZPlatform
+    $steamLabel = Get-LordZSteamCmdExecutableName
 
     Write-LordZUtf8NoBom -Path $batchPath -Lines $batch.ScriptLines
 
-    $steamCmdLiteral = $SteamCmdPath -replace "'", "''"
-    $batchLiteral = $batchPath -replace "'", "''"
-    $userLiteral = $Username -replace "'", "''"
     $bannerWriteLines = Get-LordZAsciiBannerRunnerLines -InstallRoot $InstallRoot
+    $runnerContent = ''
+    $runnerPath = ''
 
-    $runnerLines = @(
-        '#Requires -Version 5.1'
-        '$ErrorActionPreference = ''Stop'''
-        ''
-    ) + @($bannerWriteLines) + @(
-        ('$SteamCmd = ''' + $steamCmdLiteral + '''')
-        ('$BatchPath = ''' + $batchLiteral + '''')
-        ('$SteamUser = ''' + $userLiteral + '''')
-        ''
-        'if (-not (Test-Path -LiteralPath $SteamCmd)) {'
-        '    Write-Host ''[!] steamcmd.exe not found'' -ForegroundColor Red'
-        '    Read-Host ''Press Enter to close'''
-        '    exit 1'
-        '}'
-        ''
-        'if (-not (Test-Path -LiteralPath $BatchPath)) {'
-        '    Write-Host ''[!] Batch file not found'' -ForegroundColor Red'
-        '    Read-Host ''Press Enter to close'''
-        '    exit 1'
-        '}'
-        ''
-        'Write-Host (''Account: '' + $SteamUser)'
-        'Write-Host ''One login for the whole queue. Approve Steam Guard on your phone if asked.'''
-        'Write-Host '''''
-        ''
-        'if ([string]::IsNullOrWhiteSpace($SteamUser)) {'
-        '    $SteamUser = Read-Host ''Steam username'''
-        '}'
-        ''
-        '$securePass = Read-Host ''Steam password'' -AsSecureString'
-        '$passPtr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)'
-        '$SteamPass = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($passPtr)'
-        '[System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passPtr)'
-        '$securePass.Dispose()'
-        ''
-        'if ([string]::IsNullOrWhiteSpace($SteamUser) -or [string]::IsNullOrWhiteSpace($SteamPass)) {'
-        '    Write-Host ''[!] Username and password are required.'' -ForegroundColor Red'
-        '    Read-Host ''Press Enter to close'''
-        '    exit 1'
-        '}'
-        ''
-        '$ops = Get-Content -LiteralPath $BatchPath | Where-Object { $_ -notmatch ''^\s*login\s'' -and -not [string]::IsNullOrWhiteSpace($_) }'
-        '$runtimeBatch = Join-Path $env:TEMP (''lordz_mirror_run_{0}.txt'' -f (Get-Date -Format ''yyyyMMddHHmmss''))'
-        '$finalLines = @(''login '' + $SteamUser + '' '' + $SteamPass) + @($ops)'
-        '$utf8 = New-Object System.Text.UTF8Encoding $false'
-        '[System.IO.File]::WriteAllText($runtimeBatch, (($finalLines -join [Environment]::NewLine) + [Environment]::NewLine), $utf8)'
-        ''
-        'Write-Host ''[*] Starting SteamCMD...'' -ForegroundColor Yellow'
-        'Push-Location (Split-Path -Parent $SteamCmd)'
-        'try {'
-        '    & $SteamCmd +runscript $runtimeBatch'
-        '    $exit = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }'
-        '}'
-        'finally {'
-        '    Pop-Location'
-        '    if (Test-Path -LiteralPath $runtimeBatch) { Remove-Item -LiteralPath $runtimeBatch -Force -ErrorAction SilentlyContinue }'
-        '}'
-        ''
-        'Write-Host (''Finished. Exit code: '' + $exit)'
-        'Read-Host ''Press Enter to close'''
-        'exit $exit'
-    )
+    if ($platform -eq 'Linux') {
+        $runnerPath = Join-Path $genDir "LordZ-Mirror-$stamp.sh"
+        $steamCmdLiteral = $SteamCmdPath -replace '\\', '/'
+        $batchLiteral = $batchPath -replace '\\', '/'
+        $userLiteral = $Username -replace "'", "'\\''"
+        $installLiteral = $InstallRoot -replace '\\', '/'
 
-    $runnerContent = $runnerLines -join [Environment]::NewLine
-    Write-LordZUtf8NoBom -Path $runnerPath -Lines $runnerLines
+        $runnerLines = @(
+            '#!/usr/bin/env bash'
+            'set -euo pipefail'
+            ''
+            "INSTALL_ROOT='$installLiteral'"
+            "STEAMCMD='$steamCmdLiteral'"
+            "BATCH_PATH='$batchLiteral'"
+            "STEAM_USER='$userLiteral'"
+            ''
+            'BANNER_FILE="$INSTALL_ROOT/Assets/LordZ-Ascii.txt"'
+            'if [[ -f "$BANNER_FILE" ]]; then'
+            '  cat "$BANNER_FILE"'
+            'else'
+            '  echo "======================================================================"'
+            '  echo "              [ LORD ZOLTON CORE INTEGRATION ENGINE ]"'
+            '  echo "======================================================================"'
+            'fi'
+            'echo'
+            ''
+            'if [[ ! -f "$STEAMCMD" ]]; then'
+            '  echo "[!] $STEAMCMD not found"'
+            '  exit 1'
+            'fi'
+            'if [[ ! -f "$BATCH_PATH" ]]; then'
+            '  echo "[!] Batch file not found: $BATCH_PATH"'
+            '  exit 1'
+            'fi'
+            'chmod +x "$STEAMCMD" 2>/dev/null || true'
+            ''
+            'if [[ -z "$STEAM_USER" ]]; then'
+            '  read -r -p "Steam username: " STEAM_USER'
+            'fi'
+            'read -r -s -p "Steam password: " STEAM_PASS'
+            'echo'
+            ''
+            'if [[ -z "$STEAM_USER" || -z "$STEAM_PASS" ]]; then'
+            '  echo "[!] Username and password are required."'
+            '  exit 1'
+            'fi'
+            ''
+            'RUNTIME_BATCH="$(mktemp /tmp/lordz_mirror_run.XXXXXX.txt)"'
+            'trap ''rm -f "$RUNTIME_BATCH"'' EXIT'
+            '{'
+            '  echo "login $STEAM_USER $STEAM_PASS"'
+            '  grep -v ''^[[:space:]]*login[[:space:]]'' "$BATCH_PATH" | sed ''/^[[:space:]]*$/d'''
+            '} > "$RUNTIME_BATCH"'
+            ''
+            'echo "[*] Starting SteamCMD..."'
+            'cd "$(dirname "$STEAMCMD")"'
+            '"$STEAMCMD" +runscript "$RUNTIME_BATCH"'
+            'exit $?'
+        )
+
+        $runnerContent = ($runnerLines -join [Environment]::NewLine) + [Environment]::NewLine
+        Write-LordZUtf8NoBom -Path $runnerPath -Lines $runnerLines
+        try { & chmod '+x' $runnerPath 2>$null } catch { }
+    }
+    else {
+        $runnerPath = Join-Path $genDir "LordZ-Mirror-$stamp.ps1"
+        $steamCmdLiteral = $SteamCmdPath -replace "'", "''"
+        $batchLiteral = $batchPath -replace "'", "''"
+        $userLiteral = $Username -replace "'", "''"
+
+        $runnerLines = @(
+            '#Requires -Version 5.1'
+            '$ErrorActionPreference = ''Stop'''
+            ''
+        ) + @($bannerWriteLines) + @(
+            ('$SteamCmd = ''' + $steamCmdLiteral + '''')
+            ('$BatchPath = ''' + $batchLiteral + '''')
+            ('$SteamUser = ''' + $userLiteral + '''')
+            ''
+            'if (-not (Test-Path -LiteralPath $SteamCmd)) {'
+            ("    Write-Host '[!] $steamLabel not found' -ForegroundColor Red")
+            '    Read-Host ''Press Enter to close'''
+            '    exit 1'
+            '}'
+            ''
+            'if (-not (Test-Path -LiteralPath $BatchPath)) {'
+            '    Write-Host ''[!] Batch file not found'' -ForegroundColor Red'
+            '    Read-Host ''Press Enter to close'''
+            '    exit 1'
+            '}'
+            ''
+            'Write-Host (''Account: '' + $SteamUser)'
+            'Write-Host ''One login for the whole queue. Approve Steam Guard on your phone if asked.'''
+            'Write-Host '''''
+            ''
+            'if ([string]::IsNullOrWhiteSpace($SteamUser)) {'
+            '    $SteamUser = Read-Host ''Steam username'''
+            '}'
+            ''
+            '$securePass = Read-Host ''Steam password'' -AsSecureString'
+            '$passPtr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass)'
+            '$SteamPass = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($passPtr)'
+            '[System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passPtr)'
+            '$securePass.Dispose()'
+            ''
+            'if ([string]::IsNullOrWhiteSpace($SteamUser) -or [string]::IsNullOrWhiteSpace($SteamPass)) {'
+            '    Write-Host ''[!] Username and password are required.'' -ForegroundColor Red'
+            '    Read-Host ''Press Enter to close'''
+            '    exit 1'
+            '}'
+            ''
+            '$ops = Get-Content -LiteralPath $BatchPath | Where-Object { $_ -notmatch ''^\s*login\s'' -and -not [string]::IsNullOrWhiteSpace($_) }'
+            '$runtimeBatch = Join-Path $env:TEMP (''lordz_mirror_run_{0}.txt'' -f (Get-Date -Format ''yyyyMMddHHmmss''))'
+            '$finalLines = @(''login '' + $SteamUser + '' '' + $SteamPass) + @($ops)'
+            '$utf8 = New-Object System.Text.UTF8Encoding $false'
+            '[System.IO.File]::WriteAllText($runtimeBatch, (($finalLines -join [Environment]::NewLine) + [Environment]::NewLine), $utf8)'
+            ''
+            'Write-Host ''[*] Starting SteamCMD...'' -ForegroundColor Yellow'
+            'Push-Location (Split-Path -Parent $SteamCmd)'
+            'try {'
+            '    & $SteamCmd +runscript $runtimeBatch'
+            '    $exit = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }'
+            '}'
+            'finally {'
+            '    Pop-Location'
+            '    if (Test-Path -LiteralPath $runtimeBatch) { Remove-Item -LiteralPath $runtimeBatch -Force -ErrorAction SilentlyContinue }'
+            '}'
+            ''
+            'Write-Host (''Finished. Exit code: '' + $exit)'
+            'Read-Host ''Press Enter to close'''
+            'exit $exit'
+        )
+
+        $runnerContent = $runnerLines -join [Environment]::NewLine
+        Write-LordZUtf8NoBom -Path $runnerPath -Lines $runnerLines
+    }
 
     return [PSCustomObject]@{
         Success        = $true
@@ -1918,6 +2088,8 @@ function Send-LordZDiscordHelpMessage {
 }
 
 Export-ModuleMember -Function @(
+    'Get-LordZPlatform'
+    'Get-LordZSteamCmdExecutableName'
     'Get-LordZVisibilityLabels'
     'Get-LordZVisibilityValue'
     'Test-LordZSteamCmdPath'

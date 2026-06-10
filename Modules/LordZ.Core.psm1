@@ -455,6 +455,202 @@ function Test-LordZWorkshopModAvailable {
     }
 }
 
+function Get-LordZDefaultMirrorName {
+    return 'Belarus'
+}
+
+function Get-LordZDefaultModDescription {
+    param([string]$InstallRoot = '')
+
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) {
+        $candidates += Join-Path $InstallRoot 'Assets\lordz-workshop-description.txt'
+        $candidates += Join-Path $InstallRoot 'Assets/lordz-workshop-description.txt'
+    }
+
+    $moduleRoot = Split-Path -Parent $PSScriptRoot
+    if ($moduleRoot) {
+        $candidates += Join-Path $moduleRoot 'Assets\lordz-workshop-description.txt'
+        $candidates += Join-Path $moduleRoot 'Assets/lordz-workshop-description.txt'
+    }
+
+    foreach ($path in $candidates | Select-Object -Unique) {
+        if (Test-Path -LiteralPath $path) {
+            return (Get-Content -LiteralPath $path -Raw -Encoding UTF8).Trim()
+        }
+    }
+
+    return @'
+[h3]Important Information[/h3]
+
+[b]EN:[/b]
+[list]
+[*] [b]Test Mode:[/b] This mod is currently in testing.
+[*] [b]Disclaimer:[/b] The author is not responsible for any damage, crashes, or data loss caused to your server while using this mod. Install and use it at your own risk.
+[*] [b]Purpose:[/b] This modification was originally created for personal use on the author's own server.
+[/list]
+'@.Trim()
+}
+
+function Get-LordZDefaultPreviewPath {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+
+    foreach ($name in @('preview_steam.png', 'LordZ-Placeholder.png', 'Lordz Placeholder.png')) {
+        foreach ($relative in @("Assets\$name", "Assets/$name")) {
+            $candidate = Join-Path $InstallRoot $relative
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+    }
+
+    $assetsDir = Join-Path $InstallRoot 'Assets'
+    if (Test-Path -LiteralPath $assetsDir) {
+        $image = Get-ChildItem -LiteralPath $assetsDir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in '.png', '.jpg', '.jpeg' } |
+            Sort-Object Name |
+            Select-Object -First 1
+        if ($image) { return $image.FullName }
+    }
+
+    return $null
+}
+
+function Get-LordZMirrorDescription {
+    param(
+        $QueueItem,
+        [Parameter(Mandatory)][string]$SourceId,
+        [string]$InstallRoot = ''
+    )
+
+    if ($QueueItem.PSObject.Properties['ModDescription']) {
+        $custom = [string]$QueueItem.ModDescription
+        if (-not [string]::IsNullOrWhiteSpace($custom)) { return $custom.Trim() }
+    }
+
+    $default = Get-LordZDefaultModDescription -InstallRoot $InstallRoot
+    if (-not [string]::IsNullOrWhiteSpace($default)) { return $default }
+
+    return "Lord Zolton mirror of workshop item $SourceId."
+}
+
+function Prepare-LordZWorkshopPreview {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$TargetPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath)) {
+        throw "Preview image not found: $SourcePath"
+    }
+
+    $maxBytes = 1MB
+    $targetDir = Split-Path -Parent $TargetPath
+    if ($targetDir -and -not (Test-Path -LiteralPath $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+
+    if ((Get-LordZPlatform) -eq 'Windows') {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $sourceImage = [System.Drawing.Image]::FromFile($SourcePath)
+        $bitmap = New-Object System.Drawing.Bitmap 512, 512
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $graphics.DrawImage($sourceImage, 0, 0, 512, 512)
+
+            $pngPath = if ($TargetPath -match '\.(png|jpg|jpeg)$') {
+                $TargetPath
+            }
+            else {
+                Join-Path $targetDir 'workshop_preview.png'
+            }
+
+            $bitmap.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
+            if ((Get-Item -LiteralPath $pngPath).Length -le $maxBytes) {
+                return $pngPath
+            }
+
+            $jpgPath = [System.IO.Path]::ChangeExtension($pngPath, '.jpg')
+            $jpegCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
+                Where-Object { $_.MimeType -eq 'image/jpeg' } |
+                Select-Object -First 1
+
+            if (-not $jpegCodec) {
+                return $pngPath
+            }
+
+            $quality = 90
+            while ($quality -ge 55) {
+                $encoderParams = New-Object System.Drawing.Imaging.EncoderParameters 1
+                $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter (
+                    [System.Drawing.Imaging.Encoder]::Quality,
+                    [long]$quality
+                )
+                $bitmap.Save($jpgPath, $jpegCodec, $encoderParams)
+                if ((Get-Item -LiteralPath $jpgPath).Length -le $maxBytes) {
+                    if ($jpgPath -ne $pngPath -and (Test-Path -LiteralPath $pngPath)) {
+                        Remove-Item -LiteralPath $pngPath -Force
+                    }
+                    return $jpgPath
+                }
+                $quality -= 10
+            }
+
+            return $jpgPath
+        }
+        finally {
+            $graphics.Dispose()
+            $bitmap.Dispose()
+            $sourceImage.Dispose()
+        }
+    }
+
+    Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
+    if ((Get-Item -LiteralPath $TargetPath).Length -gt $maxBytes) {
+        Write-Warning "Preview exceeds 1 MB. Steam may reject the upload. Resize to 512x512 and under 1 MB."
+    }
+
+    return $TargetPath
+}
+
+function Resolve-LordZPreviewImage {
+    param(
+        [string]$CustomPreviewPath,
+        [Parameter(Mandatory)][string]$ContentFolder,
+        [Parameter(Mandatory)][string]$InstallRoot,
+        [Parameter(Mandatory)][string]$MirrorName,
+        [Parameter(Mandatory)][string]$ItemRoot
+    )
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($CustomPreviewPath) -and (Test-Path -LiteralPath $CustomPreviewPath)) {
+        [void]$candidates.Add($CustomPreviewPath)
+    }
+
+    $defaultPreview = Get-LordZDefaultPreviewPath -InstallRoot $InstallRoot
+    if ($defaultPreview -and $candidates -notcontains $defaultPreview) {
+        [void]$candidates.Add($defaultPreview)
+    }
+
+    $contentPreview = Find-LordZPreviewImage -ContentFolder $ContentFolder
+    if ($contentPreview -and $candidates -notcontains $contentPreview) {
+        [void]$candidates.Add($contentPreview)
+    }
+
+    foreach ($candidate in $candidates) {
+        try {
+            $target = Join-Path $ItemRoot 'workshop_preview.png'
+            return Prepare-LordZWorkshopPreview -SourcePath $candidate -TargetPath $target
+        }
+        catch { }
+    }
+
+    $placeholder = New-LordZPlaceholderPreview `
+        -TargetPath (Join-Path $ItemRoot 'preview.png') `
+        -MirrorName $MirrorName `
+        -InstallRoot $InstallRoot
+    return Prepare-LordZWorkshopPreview -SourcePath $placeholder -TargetPath (Join-Path $ItemRoot 'workshop_preview.png')
+}
+
 function Find-LordZPreviewImage {
     param([Parameter(Mandatory)][string]$ContentFolder)
 
@@ -1271,12 +1467,21 @@ function Build-LordZMirrorBatchScript {
             New-Item -ItemType Directory -Path $itemRoot -Force | Out-Null
         }
 
-        $preview = Find-LordZPreviewImage -ContentFolder $contentPath
-        if (-not $preview) {
-            $lordzRoot = Split-Path -Parent $SteamCmdDir
-            $preview = New-LordZPlaceholderPreview -TargetPath (Join-Path $itemRoot 'preview.png') -MirrorName $mirrorName -InstallRoot $lordzRoot
-            Write-LordZPipelineLog -Line "    -> Generated placeholder preview for '$mirrorName'." -ProgressSender $ProgressSender
+        $lordzRoot = Split-Path -Parent $SteamCmdDir
+        $customPreview = ''
+        if ($item.PSObject.Properties['CustomPreviewPath']) {
+            $customPreview = [string]$item.CustomPreviewPath
         }
+
+        $preview = Resolve-LordZPreviewImage `
+            -CustomPreviewPath $customPreview `
+            -ContentFolder $contentPath `
+            -InstallRoot $lordzRoot `
+            -MirrorName $mirrorName `
+            -ItemRoot $itemRoot
+        Write-LordZPipelineLog -Line "    -> Workshop preview: $preview" -ProgressSender $ProgressSender
+
+        $description = Get-LordZMirrorDescription -QueueItem $item -SourceId $sourceId -InstallRoot $lordzRoot
 
         $vdfPath = Join-Path $itemRoot 'mirror.vdf'
         $publishedId = '0'
@@ -1293,7 +1498,7 @@ function Build-LordZMirrorBatchScript {
             -ContentFolder $contentPath `
             -PreviewFile $preview `
             -Title $mirrorName `
-            -Description "Lord Zolton mirror of workshop item $sourceId." `
+            -Description $description `
             -ChangeNote 'Mirror sync via LordZ engine.' `
             -Visibility $visibility `
             -PublishedFileId $publishedId | Out-Null
@@ -2298,6 +2503,12 @@ Export-ModuleMember -Function @(
     'Test-LordZWorkshopModAvailable'
     'Get-LordZVdfCache'
     'Get-LordZWorkshopContentPath'
+    'Get-LordZDefaultMirrorName'
+    'Get-LordZDefaultModDescription'
+    'Get-LordZDefaultPreviewPath'
+    'Get-LordZMirrorDescription'
+    'Prepare-LordZWorkshopPreview'
+    'Resolve-LordZPreviewImage'
     'New-LordZWorkshopVdf'
     'Get-LordZDiscordConfig'
     'Get-LordZDiscordConfigPath'

@@ -153,7 +153,7 @@ function Add-LordZCliQueueItem {
         return
     }
 
-    $defaultName = if ($check.Title) { $check.Title } else { "Mirror $sourceId" }
+    $defaultName = Get-LordZDefaultMirrorName
     $mirrorName = Read-Host "Mirror name [$defaultName]"
     if ([string]::IsNullOrWhiteSpace($mirrorName)) { $mirrorName = $defaultName }
 
@@ -168,12 +168,17 @@ function Add-LordZCliQueueItem {
     $mirrorId = Read-Host 'Mirror ID (0 = new) [0]'
     if ([string]::IsNullOrWhiteSpace($mirrorId)) { $mirrorId = '0' }
 
+    $defaultPreview = Get-LordZDefaultPreviewPath -InstallRoot $script:InstallRoot
+    $defaultDescription = Get-LordZDefaultModDescription -InstallRoot $script:InstallRoot
+
     $queue = @(Get-LordZCliQueue)
     $queue += [PSCustomObject]@{
-        SourceModId      = $sourceId
-        MirrorName       = $mirrorName
-        Visibility       = $visibility
-        PublishedFileId  = $mirrorId
+        SourceModId       = $sourceId
+        MirrorName        = $mirrorName
+        Visibility        = $visibility
+        PublishedFileId   = $mirrorId
+        CustomPreviewPath = if ($defaultPreview) { $defaultPreview } else { '' }
+        ModDescription    = $defaultDescription
     }
     Save-LordZCliQueue -Queue $queue
     Write-LordZCli "[OK] Added $mirrorName ($sourceId)" ([ConsoleColor]::Green)
@@ -207,10 +212,12 @@ function Invoke-LordZCliGenerate {
     $steamDir = Split-Path -Parent $steamPath
     $mirrorQueue = $queue | ForEach-Object {
         [PSCustomObject]@{
-            SourceModId     = [string]$_.SourceModId
-            MirrorName      = [string]$_.MirrorName
-            Visibility      = [string]$_.Visibility
-            PublishedFileId = if ($_.PublishedFileId) { [string]$_.PublishedFileId } else { '0' }
+            SourceModId       = [string]$_.SourceModId
+            MirrorName        = [string]$_.MirrorName
+            Visibility        = [string]$_.Visibility
+            PublishedFileId   = if ($_.PublishedFileId) { [string]$_.PublishedFileId } else { '0' }
+            CustomPreviewPath = if ($_.CustomPreviewPath) { [string]$_.CustomPreviewPath } else { '' }
+            ModDescription    = if ($_.ModDescription) { [string]$_.ModDescription } else { '' }
         }
     }
 

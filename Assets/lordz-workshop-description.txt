@@ -1,0 +1,15 @@
+[h3]Important Information / Важная информация[/h3]
+
+[b]RU:[/b]
+[list]
+[*] [b]Тестовый режим:[/b] Мод находится на стадии тестирования.
+[*] [b]Отказ от ответственности:[/b] Автор не несёт ответственности за любой ущерб, сбои или потерю данных вашего сервера при использовании данного мода. Вы устанавливаете его на свой страх и риск.
+[*] [b]Назначение:[/b] Изначально модификация создавалась для личного использования на авторском сервере.
+[/list]
+
+[b]EN:[/b]
+[list]
+[*] [b]Test Mode:[/b] This mod is currently in testing.
+[*] [b]Disclaimer:[/b] The author is not responsible for any damage, crashes, or data loss caused to your server while using this mod. Install and use it at your own risk.
+[*] [b]Purpose:[/b] This modification was originally created for personal use on the author's own server.
+[/list]

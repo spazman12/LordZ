@@ -1373,10 +1373,12 @@ function Get-LordZMirrorQueueFromGrid {
     foreach ($row in $Grid.Rows) {
         if ($row.IsNewRow) { continue }
         $queue += [PSCustomObject]@{
-            SourceModId     = [string]$row.Cells[0].Value
-            MirrorName      = [string]$row.Cells[1].Value
-            Visibility      = [string]$row.Cells[2].Value
-            PublishedFileId = [string]$row.Cells[3].Value
+            SourceModId        = [string]$row.Cells[0].Value
+            MirrorName         = [string]$row.Cells[1].Value
+            Visibility         = [string]$row.Cells[2].Value
+            PublishedFileId    = [string]$row.Cells[3].Value
+            CustomPreviewPath  = [string]$row.Cells[4].Value
+            ModDescription     = [string]$row.Cells[5].Value
         }
     }
     return $queue
@@ -2667,7 +2669,9 @@ $configPanel.Controls.Add($lordzDisclaimer)
 
 Set-LordZSplashStatus 'Assembling mirror queue...'
 
-$queueTable = New-LordZInputTable -RowCount 5 -ExtraColumnWidth 168 -RowHeights @(48, 48, 48, 48, 52)
+$script:LordZDefaultPreviewPath = Get-LordZDefaultPreviewPath -InstallRoot $script:InstallRoot
+
+$queueTable = New-LordZInputTable -RowCount 7 -ExtraColumnWidth 168 -RowHeights @(48, 48, 48, 48, 48, 96, 52)
 
 $queueTable.Controls.Add((New-LordZFieldLabel -Text 'Original Mod ID'), 0, 0)
 $txtSourceModId = New-LordZTextBox
@@ -2676,6 +2680,7 @@ $queueTable.SetColumnSpan($txtSourceModId, 2)
 
 $queueTable.Controls.Add((New-LordZFieldLabel -Text 'Mirror Name'), 0, 1)
 $txtMirrorName = New-LordZTextBox
+$txtMirrorName.Text = Get-LordZDefaultMirrorName
 $queueTable.Controls.Add($txtMirrorName, 1, 1)
 $queueTable.SetColumnSpan($txtMirrorName, 2)
 
@@ -2706,6 +2711,38 @@ $pubHint.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
 $pubHint.Margin = New-Object System.Windows.Forms.Padding(8, 6, 0, 6)
 $queueTable.Controls.Add($pubHint, 2, 3)
 
+$queueTable.Controls.Add((New-LordZFieldLabel -Text 'Preview Image'), 0, 4)
+$txtCustomPreview = New-LordZTextBox
+$txtCustomPreview.ReadOnly = $true
+if ($script:LordZDefaultPreviewPath) {
+    $txtCustomPreview.Text = $script:LordZDefaultPreviewPath
+}
+$queueTable.Controls.Add($txtCustomPreview, 1, 4)
+
+$previewButtonRow = New-Object System.Windows.Forms.FlowLayoutPanel
+$previewButtonRow.Dock = 'Fill'
+$previewButtonRow.AutoSize = $false
+$previewButtonRow.WrapContents = $false
+$previewButtonRow.Margin = New-Object System.Windows.Forms.Padding(0)
+$previewButtonRow.Padding = New-Object System.Windows.Forms.Padding(0)
+$btnBrowsePreview = New-LordZButton -Text '...' -BackColor $script:LordZFlame.BtnNeutral -FillCell
+$btnBrowsePreview.MinimumSize = New-Object System.Drawing.Size(52, 36)
+$btnBrowsePreview.Margin = New-Object System.Windows.Forms.Padding(0, 6, 6, 6)
+$btnClearPreview = New-LordZButton -Text 'X' -BackColor $script:LordZFlame.BtnDanger -FillCell
+$btnClearPreview.MinimumSize = New-Object System.Drawing.Size(52, 36)
+$btnClearPreview.Margin = New-Object System.Windows.Forms.Padding(0, 6, 0, 6)
+[void]$previewButtonRow.Controls.Add($btnBrowsePreview)
+[void]$previewButtonRow.Controls.Add($btnClearPreview)
+$queueTable.Controls.Add($previewButtonRow, 2, 4)
+
+$queueTable.Controls.Add((New-LordZFieldLabel -Text 'Description'), 0, 5)
+$txtModDescription = New-LordZTextBox
+$txtModDescription.Multiline = $true
+$txtModDescription.ScrollBars = 'Vertical'
+$txtModDescription.Text = Get-LordZDefaultModDescription -InstallRoot $script:InstallRoot
+$queueTable.Controls.Add($txtModDescription, 1, 5)
+$queueTable.SetColumnSpan($txtModDescription, 2)
+
 $queueButtonRow = New-Object System.Windows.Forms.FlowLayoutPanel
 $queueButtonRow.Dock = 'Fill'
 $queueButtonRow.AutoSize = $false
@@ -2731,7 +2768,7 @@ $btnAddQueue.Margin = New-Object System.Windows.Forms.Padding(0, 0, 8, 0)
 [void]$queueButtonRow.Controls.Add($btnCopyScript)
 [void]$queueButtonRow.Controls.Add($btnAddQueue)
 [void]$queueButtonRow.Controls.Add($btnRemoveQueue)
-$queueTable.Controls.Add($queueButtonRow, 1, 4)
+$queueTable.Controls.Add($queueButtonRow, 1, 6)
 $queueTable.SetColumnSpan($queueButtonRow, 2)
 
 $queueGrid = New-Object System.Windows.Forms.DataGridView
@@ -2761,6 +2798,8 @@ $queueGrid.EnableHeadersVisualStyles = $false
 [void]$queueGrid.Columns.Add('MirrorName', 'Mirror Name')
 [void]$queueGrid.Columns.Add('Visibility', 'Visibility')
 [void]$queueGrid.Columns.Add('PublishedFileId', 'Mirror ID')
+[void]$queueGrid.Columns.Add('CustomPreviewPath', 'Preview')
+[void]$queueGrid.Columns.Add('ModDescription', 'Description')
 
 $queuePanel.Controls.Add($queueGrid)
 $queuePanel.Controls.Add($queueTable)
@@ -3100,11 +3139,39 @@ $btnAddQueue.Add_Click({
         $mirrorName = 'New Mirror'
     }
 
-    [void]$queueGrid.Rows.Add($sourceId, $mirrorName, $visibility, $publishedId)
+    $customPreview = $txtCustomPreview.Text.Trim()
+    $modDescription = $txtModDescription.Text.Trim()
+
+    [void]$queueGrid.Rows.Add($sourceId, $mirrorName, $visibility, $publishedId, $customPreview, $modDescription)
     Write-LordZLog "Queued mirror '$mirrorName' from source mod $sourceId ($visibility)."
     $txtSourceModId.Clear()
-    $txtMirrorName.Clear()
+    $txtMirrorName.Text = Get-LordZDefaultMirrorName
     $txtPublishedId.Text = '0'
+    if ($script:LordZDefaultPreviewPath) {
+        $txtCustomPreview.Text = $script:LordZDefaultPreviewPath
+    }
+    else {
+        $txtCustomPreview.Clear()
+    }
+    $txtModDescription.Text = Get-LordZDefaultModDescription -InstallRoot $script:InstallRoot
+})
+
+$btnBrowsePreview.Add_Click({
+    $dialog = New-Object System.Windows.Forms.OpenFileDialog
+    $dialog.Filter = 'Image files (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg|All files (*.*)|*.*'
+    $dialog.Title = 'Select Workshop preview image'
+    if ($dialog.ShowDialog() -eq 'OK') {
+        $txtCustomPreview.Text = $dialog.FileName
+    }
+})
+
+$btnClearPreview.Add_Click({
+    if ($script:LordZDefaultPreviewPath) {
+        $txtCustomPreview.Text = $script:LordZDefaultPreviewPath
+    }
+    else {
+        $txtCustomPreview.Clear()
+    }
 })
 
 $btnRemoveQueue.Add_Click({

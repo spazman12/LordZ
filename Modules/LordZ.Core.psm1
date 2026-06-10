@@ -2051,13 +2051,43 @@ function Get-LordZDiscordMessageText {
     if ($Message.embeds) {
         $embeds = @($Message.embeds)
         foreach ($embed in $embeds) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$embed.title)) {
+                return ([string]$embed.title).Trim()
+            }
             if (-not [string]::IsNullOrWhiteSpace([string]$embed.description)) {
                 return ([string]$embed.description).Trim()
             }
         }
     }
 
+    if ($Message.attachments) {
+        $attachments = @($Message.attachments)
+        if ($attachments.Count -gt 0) {
+            return ('[attachment] ' + [string]$attachments[0].filename)
+        }
+    }
+
     return ''
+}
+
+function Test-LordZDiscordBotMessage {
+    param(
+        $Message,
+        [string]$BotUserId
+    )
+
+    if (-not $Message -or -not $Message.author) { return $false }
+
+    $author = $Message.author
+    if ($author.PSObject.Properties['bot'] -and $author.bot) {
+        return $true
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($BotUserId) -and [string]$author.id -eq $BotUserId) {
+        return $true
+    }
+
+    return $false
 }
 
 function Get-LordZDiscordHelpChatUpdates {
@@ -2094,11 +2124,11 @@ function Get-LordZDiscordHelpChatUpdates {
         $updates = New-Object System.Collections.Generic.List[object]
         foreach ($msg in ($messages | Sort-Object { [uint64]$_.id })) {
             if ([uint64]$msg.id -le $lastIdNum) { continue }
-            if ([string]$msg.author.id -eq $BotUserId) { continue }
+            if (Test-LordZDiscordBotMessage -Message $msg -BotUserId $BotUserId) { continue }
 
             $text = Get-LordZDiscordMessageText -Message $msg
             if ([string]::IsNullOrWhiteSpace($text)) {
-                $text = '(Support replied, but message text is empty. Enable Message Content Intent on the Discord bot.)'
+                $text = '(Support replied, but LordZ could not read the message text.)'
             }
 
             $displayName = if ($msg.author.global_name) { [string]$msg.author.global_name } else { [string]$msg.author.username }

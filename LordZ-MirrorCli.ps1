@@ -249,107 +249,85 @@ function Invoke-LordZCliDiscordRequest {
     }
 }
 
-function Receive-LordZCliDiscordUpdates {
-    param($Session)
+function Write-LordZCliDiscordUpdate {
+    param($Update)
 
-    try {
-        $updates = Get-LordZDiscordHelpChatUpdates `
-            -InstallRoot $script:InstallRoot `
-            -ThreadId $Session.ThreadId `
-            -LastMessageId $Session.LastMessageId `
-            -BotUserId $Session.BotUserId `
-            -SupportLabel $Session.SupportLabel
-
-        foreach ($update in $updates) {
-            Write-Host ''
-            $label = if ($update.DisplayName) {
-                ('{0} ({1})' -f $update.Speaker, $update.DisplayName)
-            }
-            else {
-                $update.Speaker
-            }
-            Write-LordZCli ("[{0}] {1}" -f $label, $update.Text) ([ConsoleColor]::Cyan)
-            $Session.LastMessageId = $update.MessageId
-        }
+    Write-Host ''
+    $label = if ($Update.DisplayName) {
+        ('{0} ({1})' -f $Update.Speaker, $Update.DisplayName)
     }
-    catch {
-        Write-Host ''
-        Write-LordZCli ("[!] Live chat poll failed: $($_.Exception.Message)") ([ConsoleColor]::DarkYellow)
+    else {
+        $Update.Speaker
+    }
+    Write-LordZCli ("[{0}] {1}" -f $label, $Update.Text) ([ConsoleColor]::Cyan)
+}
+
+function Start-LordZCliDiscordPollJob {
+    param($SessionBag)
+
+    return Start-ThreadJob -ArgumentList $SessionBag -ScriptBlock {
+        param($bag)
+
+        Import-Module (Join-Path $bag.InstallRoot 'Modules/LordZ.Core.psm1') -Force
+        Initialize-LordZTls
+
+        while (-not $bag.Stop) {
+            try {
+                $updates = Get-LordZDiscordHelpChatUpdates `
+                    -InstallRoot $bag.InstallRoot `
+                    -ThreadId $bag.ThreadId `
+                    -LastMessageId $bag.LastMessageId `
+                    -BotUserId $bag.BotUserId `
+                    -SupportLabel $bag.SupportLabel
+
+                foreach ($update in $updates) {
+                    $bag.LastMessageId = $update.MessageId
+                    $label = if ($update.DisplayName) {
+                        ('{0} ({1})' -f $update.Speaker, $update.DisplayName)
+                    }
+                    else {
+                        [string]$update.Speaker
+                    }
+
+                    try {
+                        [Console]::Out.WriteLine('')
+                        [Console]::Out.WriteLine("[$label] $($update.Text)")
+                    }
+                    catch { }
+                }
+            }
+            catch {
+                try {
+                    [Console]::Out.WriteLine('')
+                    [Console]::Out.WriteLine("[!] Live chat poll failed: $($_.Exception.Message)")
+                }
+                catch { }
+            }
+
+            Start-Sleep -Seconds 2
+        }
     }
 }
 
-function Read-LordZCliChatLine {
-    param(
-        [Parameter(Mandatory)][scriptblock]$OnPoll,
-        [int]$PollSeconds = 3
-    )
+function Receive-LordZCliDiscordPollJob {
+    param($Job)
 
-    if ((Get-LordZPlatform) -eq 'Linux' -and (Get-Command bash -ErrorAction SilentlyContinue)) {
-        while ($true) {
-            & $OnPoll
+    if (-not $Job) { return }
 
-            Write-Host -NoNewline '> '
-            $bashRead = 'read -t {0} -e line 2>/dev/null || true; printf "%s" "${{line:-}}"' -f $PollSeconds
-            $raw = bash -c $bashRead
-            Write-Host ''
+    $null = Receive-Job -Job $Job -ErrorAction SilentlyContinue
+}
 
-            if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+function Stop-LordZCliDiscordPollJob {
+    param($Job, $SessionBag)
 
-            $trimmed = $raw.Trim()
-            if ($trimmed -eq '/quit' -or $trimmed -eq '/exit') {
-                return ''
-            }
-
-            return $trimmed
-        }
+    if ($SessionBag) {
+        $SessionBag.Stop = $true
     }
 
-    $buffer = New-Object System.Text.StringBuilder
-    $useLiveInput = $true
+    if (-not $Job) { return }
 
-    try {
-        if ([Console]::IsInputRedirected) { $useLiveInput = $false }
-    }
-    catch {
-        $useLiveInput = $false
-    }
-
-    if (-not $useLiveInput) {
-        & $OnPoll
-        Write-Host -NoNewline '> '
-        return Read-Host
-    }
-
-    Write-Host -NoNewline '> '
-
-    while ($true) {
-        & $OnPoll
-
-        if (-not [Console]::KeyAvailable) {
-            Start-Sleep -Milliseconds 350
-            continue
-        }
-
-        $keyInfo = [Console]::ReadKey($true)
-
-        if ($keyInfo.Key -eq [ConsoleKey]::Enter) {
-            Write-Host ''
-            return $buffer.ToString()
-        }
-
-        if ($keyInfo.Key -eq [ConsoleKey]::Backspace) {
-            if ($buffer.Length -gt 0) {
-                [void]$buffer.Remove($buffer.Length - 1, 1)
-                Write-Host "`b `b" -NoNewline
-            }
-            continue
-        }
-
-        if ([char]::IsControl($keyInfo.KeyChar)) { continue }
-
-        [void]$buffer.Append($keyInfo.KeyChar)
-        Write-Host $keyInfo.KeyChar -NoNewline
-    }
+    try { Stop-Job -Job $Job -ErrorAction SilentlyContinue } catch { }
+    try { Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue } catch { }
 }
 
 function Invoke-LordZCliDiscordChat {
@@ -369,31 +347,50 @@ function Invoke-LordZCliDiscordChat {
     }
 
     Write-LordZCli "[OK] Session $($session.SessionId) connected." ([ConsoleColor]::Green)
-    Write-LordZCli 'Discord replies print automatically every few seconds.' ([ConsoleColor]::DarkGray)
+    Write-LordZCli 'Listening in the background. Discord replies should print automatically.' ([ConsoleColor]::DarkGray)
     Write-LordZCli 'Type a message and press Enter to send. Type /quit to exit.' ([ConsoleColor]::DarkGray)
 
-    $pollBlock = { Receive-LordZCliDiscordUpdates -Session $session }
-    & $pollBlock
+    $sessionBag = [hashtable]::Synchronized(@{
+            Stop          = $false
+            InstallRoot   = $script:InstallRoot
+            ThreadId      = $session.ThreadId
+            LastMessageId = $session.LastMessageId
+            BotUserId     = $session.BotUserId
+            SupportLabel  = $session.SupportLabel
+        })
 
-    while ($true) {
-        $line = Read-LordZCliChatLine -OnPoll $pollBlock
-        if ([string]::IsNullOrWhiteSpace($line)) { break }
+    $pollJob = Start-LordZCliDiscordPollJob -SessionBag $sessionBag
 
-        $send = Send-LordZDiscordHelpChatMessage `
-            -InstallRoot $script:InstallRoot `
-            -ThreadId $session.ThreadId `
-            -AnonymousLabel $session.AnonymousLabel `
-            -Message $line
+    try {
+        while ($true) {
+            $null = Wait-Job -Job $pollJob -Timeout 1 -ErrorAction SilentlyContinue
+            Receive-LordZCliDiscordPollJob -Job $pollJob
 
-        if (-not $send.Success) {
-            Write-LordZCli "[!] $($send.Message)" ([ConsoleColor]::Red)
+            Write-Host -NoNewline '> '
+            $line = Read-Host
+
+            Receive-LordZCliDiscordPollJob -Job $pollJob
+
+            if ($line -eq '/quit' -or $line -eq '/exit') { break }
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+            $send = Send-LordZDiscordHelpChatMessage `
+                -InstallRoot $script:InstallRoot `
+                -ThreadId $session.ThreadId `
+                -AnonymousLabel $session.AnonymousLabel `
+                -Message $line
+
+            if (-not $send.Success) {
+                Write-LordZCli "[!] $($send.Message)" ([ConsoleColor]::Red)
+            }
+            else {
+                $sessionBag.LastMessageId = $send.MessageId
+                Write-LordZCli '[You] Message sent.' ([ConsoleColor]::DarkGray)
+            }
         }
-        else {
-            $session.LastMessageId = $send.MessageId
-            Write-LordZCli '[You] Message sent.' ([ConsoleColor]::DarkGray)
-        }
-
-        & $pollBlock
+    }
+    finally {
+        Stop-LordZCliDiscordPollJob -Job $pollJob -SessionBag $sessionBag
     }
 }
 

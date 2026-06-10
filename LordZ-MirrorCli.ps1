@@ -11,6 +11,7 @@ $script:QueuePath = Join-Path $script:InstallRoot 'lordz.queue.json'
 $script:LastPackage = $null
 
 Import-Module (Join-Path $script:InstallRoot 'Modules/LordZ.Core.psm1') -Force
+Initialize-LordZTls
 
 function Write-LordZCli {
     param([string]$Message, [ConsoleColor]$Color = [ConsoleColor]::Gray)

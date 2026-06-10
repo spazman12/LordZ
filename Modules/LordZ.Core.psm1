@@ -1727,6 +1727,141 @@ function Test-LordZDiscordConfig {
     }
 }
 
+function Initialize-LordZTls {
+    try {
+        if ($PSVersionTable.PSEdition -eq 'Desktop' -or (Get-LordZPlatform) -eq 'Windows') {
+            [Net.ServicePointManager]::SecurityProtocol = `
+                [Net.SecurityProtocolType]::Tls12 -bor `
+                [Net.SecurityProtocolType]::Tls11 -bor `
+                [Net.SecurityProtocolType]::Tls
+        }
+    }
+    catch { }
+}
+
+function Get-LordZSslTroubleshootingHint {
+    if ((Get-LordZPlatform) -ne 'Linux') { return '' }
+
+    return @'
+
+Linux SSL fix:
+  sudo apt-get install -y ca-certificates curl
+  sudo update-ca-certificates
+Then restart LordZ (./lordz.sh).
+'@.Trim()
+}
+
+function Test-LordZSslError {
+    param([string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $false }
+    return $Message -match 'SSL|certificate|cert|TLS|tls|trust|handshake'
+}
+
+function Invoke-LordZRestMethod {
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][ValidateSet('Get', 'Post', 'Patch', 'Delete', 'Put')][string]$Method,
+        [hashtable]$Headers = @{},
+        [string]$ContentType = '',
+        [string]$Body = '',
+        [object]$JsonBody = $null
+    )
+
+    Initialize-LordZTls
+
+    $params = @{
+        Uri         = $Uri
+        Method      = $Method
+        Headers     = $Headers
+        ErrorAction = 'Stop'
+    }
+
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        $params.SslProtocol = [System.Security.Authentication.SslProtocols]::Tls12
+    }
+
+    if ($null -ne $JsonBody) {
+        $params.ContentType = 'application/json; charset=utf-8'
+        $params.Body = ($JsonBody | ConvertTo-Json -Depth 8 -Compress)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($Body)) {
+        if (-not [string]::IsNullOrWhiteSpace($ContentType)) {
+            $params.ContentType = $ContentType
+        }
+        $params.Body = $Body
+    }
+
+    try {
+        return Invoke-RestMethod @params
+    }
+    catch {
+        $detail = $_.Exception.Message
+        if ($_.Exception.InnerException) {
+            $detail += ' | Inner: ' + $_.Exception.InnerException.Message
+        }
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            try {
+                $err = $_.ErrorDetails.Message | ConvertFrom-Json
+                if ($err.message) { $detail = [string]$err.message }
+            }
+            catch {
+                $detail += ' | ' + [string]$_.ErrorDetails.Message
+            }
+        }
+        if (Test-LordZSslError -Message $detail) {
+            $hint = Get-LordZSslTroubleshootingHint
+            if ($hint) { $detail += "`n`n$hint" }
+        }
+        throw [System.InvalidOperationException]::new($detail)
+    }
+}
+
+function Invoke-LordZDiscordBotRequestViaCurl {
+    param(
+        [Parameter(Mandatory)][string]$BotToken,
+        [Parameter(Mandatory)][ValidateSet('Get', 'Post', 'Patch', 'Delete')][string]$Method,
+        [Parameter(Mandatory)][string]$Path,
+        [object]$Body
+    )
+
+    if (-not (Get-Command curl -ErrorAction SilentlyContinue)) {
+        throw [System.InvalidOperationException]::new('curl is not installed. Run: sudo apt-get install -y curl ca-certificates')
+    }
+
+    $uri = 'https://discord.com/api/v10' + $Path
+    $curlArgs = @(
+        '-sS', '-f',
+        '-H', "Authorization: Bot $BotToken",
+        '-H', 'User-Agent: LordZMirrorEngine/1.0',
+        '-X', $Method,
+        $uri
+    )
+
+    if ($null -ne $Body) {
+        $json = $Body | ConvertTo-Json -Depth 8 -Compress
+        $curlArgs = @(
+            '-sS', '-f',
+            '-H', "Authorization: Bot $BotToken",
+            '-H', 'User-Agent: LordZMirrorEngine/1.0',
+            '-H', 'Content-Type: application/json',
+            '-X', $Method,
+            '--data', $json,
+            $uri
+        )
+    }
+
+    $output = & curl @curlArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $text = ($output | Out-String).Trim()
+        throw [System.InvalidOperationException]::new("Discord curl fallback failed: $text")
+    }
+
+    $text = ($output | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    return $text | ConvertFrom-Json
+}
+
 function Invoke-LordZDiscordBotRequest {
     param(
         [Parameter(Mandatory)][string]$BotToken,
@@ -1741,29 +1876,18 @@ function Invoke-LordZDiscordBotRequest {
         'User-Agent'  = 'LordZMirrorEngine/1.0'
     }
 
-    $params = @{
-        Uri         = $uri
-        Method      = $Method
-        Headers     = $headers
-        ErrorAction = 'Stop'
-    }
-
-    if ($null -ne $Body) {
-        $params.ContentType = 'application/json; charset=utf-8'
-        $params.Body = ($Body | ConvertTo-Json -Depth 8 -Compress)
-    }
-
     try {
-        return Invoke-RestMethod @params
+        return Invoke-LordZRestMethod -Uri $uri -Method $Method -Headers $headers -JsonBody $Body
     }
     catch {
         $detail = $_.Exception.Message
-        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+        if ((Get-LordZPlatform) -eq 'Linux' -and (Test-LordZSslError -Message $detail)) {
             try {
-                $err = $_.ErrorDetails.Message | ConvertFrom-Json
-                if ($err.message) { $detail = [string]$err.message }
+                return Invoke-LordZDiscordBotRequestViaCurl -BotToken $BotToken -Method $Method -Path $Path -Body $Body
             }
-            catch { }
+            catch {
+                $detail += "`n`nCurl fallback also failed: $($_.Exception.Message)"
+            }
         }
         throw [System.InvalidOperationException]::new($detail)
     }
@@ -2094,7 +2218,7 @@ function Send-LordZDiscordHelpMessage {
 
     try {
         $body = $payload | ConvertTo-Json -Depth 6 -Compress
-        Invoke-RestMethod -Uri $config.WebhookUrl -Method Post -ContentType 'application/json; charset=utf-8' -Body $body -ErrorAction Stop | Out-Null
+        Invoke-LordZRestMethod -Uri $config.WebhookUrl -Method Post -ContentType 'application/json; charset=utf-8' -Body $body | Out-Null
         return [PSCustomObject]@{
             Success = $true
             Message = "Help request relayed to $($config.ChannelLabel)."
@@ -2109,6 +2233,7 @@ function Send-LordZDiscordHelpMessage {
 }
 
 Export-ModuleMember -Function @(
+    'Initialize-LordZTls'
     'Get-LordZPlatform'
     'Get-LordZSteamCmdExecutableName'
     'Get-LordZVisibilityLabels'

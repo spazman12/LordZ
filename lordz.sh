@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+# Help PowerShell/.NET find system CA certificates on Debian/Ubuntu.
+if [[ -d /etc/ssl/certs ]]; then
+  export SSL_CERT_DIR="${SSL_CERT_DIR:-/etc/ssl/certs}"
+fi
+if [[ -f /etc/ssl/certs/ca-certificates.crt ]]; then
+  export SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+fi
+
 if command -v pwsh >/dev/null 2>&1; then
   exec pwsh -NoProfile -File "$ROOT/LordZ-MirrorCli.ps1" "$@"
 fi

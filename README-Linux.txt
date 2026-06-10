@@ -9,8 +9,11 @@ REQUIREMENTS
 ------------
   - Linux (Ubuntu/Debian recommended) or macOS
   - PowerShell 7+ (pwsh)
+  - CA certificates + curl (required for Discord live chat):
+      sudo apt-get install -y ca-certificates curl
+      sudo update-ca-certificates
   - 32-bit libraries for SteamCMD on Linux:
-      sudo apt-get install -y lib32gcc-s1 lib32stdc++6 libc6-i386 curl tar
+      sudo apt-get install -y lib32gcc-s1 lib32stdc++6 libc6-i386 tar
   - Steam account that owns the game
 
 INSTALL
@@ -38,6 +41,11 @@ DISCORD HELP
 ------------
   Option 9  - Quick Request (webhook)
   Option 10 - Live Help Chat (if bundled lordz.discord.json is present)
+
+  If live chat says "SSL connection could not be established":
+      sudo apt-get install -y ca-certificates curl
+      sudo update-ca-certificates
+      ./lordz.sh
 
 DISCLAIMER
 ----------

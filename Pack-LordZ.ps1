@@ -34,6 +34,9 @@ $includeFiles = @(
     'lordz.discord.example.json'
 )
 
+$discordConfigPath = Join-Path $installRoot 'lordz.discord.json'
+$bundleDiscordConfig = Test-Path -LiteralPath $discordConfigPath
+
 $includeDirs = @(
     'Assets'
     'Generated'
@@ -80,6 +83,15 @@ foreach ($relativePath in $includeDirs) {
     }
 
     Copy-Item -LiteralPath $source -Destination $target -Recurse -Force
+}
+
+# Ship live Discord support config in release zips (not committed to git).
+if ($bundleDiscordConfig) {
+    Copy-Item -LiteralPath $discordConfigPath -Destination (Join-Path $stageRoot 'lordz.discord.json') -Force
+    Write-Host '[*] Bundled lordz.discord.json for Live Help Chat + Quick Request.'
+}
+else {
+    Write-Host '[!] lordz.discord.json not found - release users will need to configure Discord manually.'
 }
 
 # Strip dev-only generated scripts from the distributable copy.

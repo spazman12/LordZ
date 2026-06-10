@@ -727,7 +727,7 @@ function Update-LordZDiscordPanel {
     }
 
     if ($parts.Count -eq 0) {
-        $script:LblDiscordStatus.Text = 'Not configured - copy lordz.discord.example.json to lordz.discord.json'
+        $script:LblDiscordStatus.Text = 'Discord support not bundled - download the release zip from GitHub (not git clone) for Live Help Chat'
         $script:BtnDiscordOpen.Enabled = $false
         $script:BtnDiscordChat.Enabled = $false
         $script:BtnDiscordSend.Enabled = $false

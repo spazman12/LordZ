@@ -1494,14 +1494,43 @@ function Get-LordZDiscordConfig {
     }
 }
 
+function Test-LordZDiscordPlaceholder {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $true }
+
+    $trimmed = $Value.Trim()
+    $placeholders = @(
+        'YOUR_BOT_TOKEN'
+        'YOUR_WEBHOOK_ID'
+        'YOUR_WEBHOOK_TOKEN'
+        'YOUR_CLIENT_ID'
+        'CHANGEME'
+        'REPLACE_ME'
+    )
+
+    foreach ($placeholder in $placeholders) {
+        if ($trimmed -ieq $placeholder) { return $true }
+        if ($trimmed -match [regex]::Escape($placeholder)) { return $true }
+    }
+
+    return $false
+}
+
 function Test-LordZDiscordConfig {
     param([Parameter(Mandatory)][string]$InstallRoot)
 
     $config = Get-LordZDiscordConfig -InstallRoot $InstallRoot
+    $inviteReady = (-not [string]::IsNullOrWhiteSpace($config.InviteUrl)) -and (-not (Test-LordZDiscordPlaceholder -Value $config.InviteUrl))
+    $webhookReady = (-not [string]::IsNullOrWhiteSpace($config.WebhookUrl)) -and (-not (Test-LordZDiscordPlaceholder -Value $config.WebhookUrl))
+    $chatReady = (-not [string]::IsNullOrWhiteSpace($config.BotToken)) `
+        -and (-not [string]::IsNullOrWhiteSpace($config.HelpChannelId)) `
+        -and (-not (Test-LordZDiscordPlaceholder -Value $config.BotToken))
+
     return [PSCustomObject]@{
-        InviteConfigured  = -not [string]::IsNullOrWhiteSpace($config.InviteUrl)
-        WebhookConfigured = -not [string]::IsNullOrWhiteSpace($config.WebhookUrl)
-        ChatConfigured    = (-not [string]::IsNullOrWhiteSpace($config.BotToken)) -and (-not [string]::IsNullOrWhiteSpace($config.HelpChannelId))
+        InviteConfigured  = $inviteReady
+        WebhookConfigured = $webhookReady
+        ChatConfigured    = $chatReady
         ChannelLabel      = $config.ChannelLabel
         ConfigPath        = (Get-LordZDiscordConfigPath -InstallRoot $InstallRoot)
     }

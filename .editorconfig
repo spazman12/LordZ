@@ -1,0 +1,11 @@
+root = true
+
+[*.sh]
+end_of_line = lf
+insert_final_newline = true
+
+[lordz.sh]
+end_of_line = lf
+
+[start-lordz.sh]
+end_of_line = lf

@@ -10,8 +10,37 @@ $script:SettingsPath = Join-Path $script:InstallRoot 'lordz.settings.json'
 $script:QueuePath = Join-Path $script:InstallRoot 'lordz.queue.json'
 $script:LastPackage = $null
 
-Import-Module (Join-Path $script:InstallRoot 'Modules/LordZ.Core.psm1') -Force
-Initialize-LordZTls
+function Import-LordZCoreModule {
+    $coreModule = Join-Path $script:InstallRoot 'Modules/LordZ.Core.psm1'
+    if (-not (Test-Path -LiteralPath $coreModule)) {
+        throw @"
+LordZ install is incomplete.
+
+Extract the full LordZ-linux-*.zip into one folder, then:
+  cd LordZ
+  bash start-lordz.sh
+
+Missing: $coreModule
+"@
+    }
+
+    Import-Module $coreModule -Force
+
+    if (-not (Get-Command -Name 'Initialize-LordZTls' -ErrorAction SilentlyContinue)) {
+        throw @"
+LordZ.Core module is outdated or incomplete.
+
+Delete this LordZ folder and re-extract the latest LordZ-linux-*.zip.
+Then run: bash start-lordz.sh
+
+Folder: $script:InstallRoot
+"@
+    }
+
+    Initialize-LordZTls
+}
+
+Import-LordZCoreModule
 
 function Write-LordZCli {
     param([string]$Message, [ConsoleColor]$Color = [ConsoleColor]::Gray)
@@ -269,7 +298,9 @@ function Start-LordZCliDiscordPollJob {
         param($bag)
 
         Import-Module (Join-Path $bag.InstallRoot 'Modules/LordZ.Core.psm1') -Force
-        Initialize-LordZTls
+        if (Get-Command -Name 'Initialize-LordZTls' -ErrorAction SilentlyContinue) {
+            Initialize-LordZTls
+        }
 
         while (-not $bag.Stop) {
             try {

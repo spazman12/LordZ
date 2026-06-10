@@ -1,2 +1,4 @@
 *.sh text eol=lf
+*.psm1 text eol=lf
 lordz.sh text eol=lf
+start-lordz.sh text eol=lf

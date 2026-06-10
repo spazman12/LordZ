@@ -21,10 +21,62 @@ function Repair-LordZUnixLineEndings {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     $text = [System.IO.File]::ReadAllText($Path)
     $normalized = $text -replace "`r`n", "`n" -replace "`r", "`n"
-    if ($normalized -ne $text) {
-        $encoding = New-Object System.Text.UTF8Encoding $false
-        [System.IO.File]::WriteAllText($Path, $normalized, $encoding)
+    $encoding = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Path, $normalized, $encoding)
+}
+
+function Write-LordZUnixFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Content
+    )
+
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
+
+    $normalized = $Content -replace "`r`n", "`n" -replace "`r", "`n"
+    $encoding = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Path, $normalized, $encoding)
+}
+
+function Get-LordZLinuxLauncherScript {
+    return @'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+
+if [[ ! -f "$ROOT/Modules/LordZ.Core.psm1" ]]; then
+  echo "[!] Incomplete LordZ folder."
+  echo "    Extract the full LordZ-linux zip into one folder, cd there, then run:"
+  echo "    bash start-lordz.sh"
+  echo "    Missing: $ROOT/Modules/LordZ.Core.psm1"
+  exit 1
+fi
+
+if [[ -d /etc/ssl/certs ]]; then
+  export SSL_CERT_DIR="${SSL_CERT_DIR:-/etc/ssl/certs}"
+fi
+if [[ -f /etc/ssl/certs/ca-certificates.crt ]]; then
+  export SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+fi
+
+if command -v pwsh >/dev/null 2>&1; then
+  exec pwsh -NoProfile -File "$ROOT/LordZ-MirrorCli.ps1" "$@"
+fi
+
+if command -v powershell >/dev/null 2>&1; then
+  exec powershell -NoProfile -File "$ROOT/LordZ-MirrorCli.ps1" "$@"
+fi
+
+echo "[!] PowerShell is required."
+echo "    Install: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-linux"
+echo "    Ubuntu/Debian: sudo apt-get install -y powershell"
+exit 1
+'@
 }
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $installRoot 'Release'
@@ -68,7 +120,6 @@ function New-LordZReleaseZip {
     )
 
     $linuxFiles = @(
-        'lordz.sh'
         'LordZ-MirrorCli.ps1'
         'README-Linux.txt'
     )
@@ -96,10 +147,27 @@ function New-LordZReleaseZip {
         }
 
         Copy-Item -LiteralPath $source -Destination $target -Force
-
-        if ($relativePath -match '\.sh$') {
+        if ($TargetPlatform -eq 'Linux' -and $relativePath -match '\.(sh|ps1|psm1|txt|json)$') {
             Repair-LordZUnixLineEndings -Path $target
         }
+    }
+
+    if ($TargetPlatform -eq 'Linux') {
+        $launcher = Get-LordZLinuxLauncherScript
+        Write-LordZUnixFile -Path (Join-Path $stageRoot 'lordz.sh') -Content $launcher
+        Write-LordZUnixFile -Path (Join-Path $stageRoot 'start-lordz.sh') -Content $launcher
+        Write-LordZUnixFile -Path (Join-Path $stageRoot 'START-LORDZ-LINUX.txt') -Content @'
+LINUX QUICK START
+-----------------
+1. unzip LordZ-linux-*.zip -d LordZ
+2. cd LordZ
+3. bash start-lordz.sh
+
+If you see: env: bash\r: No such file or directory
+Run this inside the LordZ folder first:
+  sed -i 's/\r$//' *.sh
+  bash start-lordz.sh
+'@
     }
 
     foreach ($relativePath in $commonDirs) {
@@ -123,6 +191,12 @@ function New-LordZReleaseZip {
     Get-ChildItem -LiteralPath (Join-Path $stageRoot 'Generated') -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne 'README.txt' } |
         Remove-Item -Force
+
+    if ($TargetPlatform -eq 'Linux') {
+        Get-ChildItem -LiteralPath $stageRoot -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in '.sh', '.ps1', '.psm1', '.txt', '.json' } |
+            ForEach-Object { Repair-LordZUnixLineEndings -Path $_.FullName }
+    }
 
     if (Test-Path -LiteralPath $ZipPath) {
         Remove-Item -LiteralPath $ZipPath -Force

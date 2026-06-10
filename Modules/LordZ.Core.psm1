@@ -326,7 +326,8 @@ function Get-LordZAsciiBannerRunnerLines {
 function Write-LordZUtf8NoBom {
     param(
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][AllowEmptyString()][AllowEmptyCollection()][string[]]$Lines
+        [Parameter(Mandatory)][AllowEmptyString()][AllowEmptyCollection()][string[]]$Lines,
+        [switch]$UseLf
     )
 
     $parent = Split-Path -Parent $Path
@@ -334,9 +335,27 @@ function Write-LordZUtf8NoBom {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
 
-    $text = ($Lines -join "`r`n") + "`r`n"
+    if (-not $UseLf -and $Path -match '\.(sh|bash)$') {
+        $UseLf = $true
+    }
+
+    $newline = if ($UseLf) { "`n" } else { "`r`n" }
+    $text = ($Lines -join $newline) + $newline
     $encoding = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($Path, $text, $encoding)
+}
+
+function Repair-LordZUnixLineEndings {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+
+    $text = [System.IO.File]::ReadAllText($Path)
+    $normalized = $text -replace "`r`n", "`n" -replace "`r", "`n"
+    if ($normalized -ne $text) {
+        $encoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($Path, $normalized, $encoding)
+    }
 }
 
 function ConvertTo-LordZEscapedPath {
@@ -1351,7 +1370,8 @@ function New-LordZMirrorRunPackage {
     $platform = Get-LordZPlatform
     $steamLabel = Get-LordZSteamCmdExecutableName
 
-    Write-LordZUtf8NoBom -Path $batchPath -Lines $batch.ScriptLines
+    $useLf = ($platform -eq 'Linux')
+    Write-LordZUtf8NoBom -Path $batchPath -Lines $batch.ScriptLines -UseLf:$useLf
 
     $bannerWriteLines = Get-LordZAsciiBannerRunnerLines -InstallRoot $InstallRoot
     $runnerContent = ''
@@ -1417,8 +1437,9 @@ function New-LordZMirrorRunPackage {
             'exit $?'
         )
 
-        $runnerContent = ($runnerLines -join [Environment]::NewLine) + [Environment]::NewLine
-        Write-LordZUtf8NoBom -Path $runnerPath -Lines $runnerLines
+        Write-LordZUtf8NoBom -Path $runnerPath -Lines $runnerLines -UseLf
+        Repair-LordZUnixLineEndings -Path $runnerPath
+        $runnerContent = [System.IO.File]::ReadAllText($runnerPath)
         try { & chmod '+x' $runnerPath 2>$null } catch { }
     }
     else {
@@ -2110,6 +2131,7 @@ Export-ModuleMember -Function @(
     'Build-LordZMirrorBatchScript'
     'New-LordZMirrorRunPackage'
     'Write-LordZUtf8NoBom'
+    'Repair-LordZUnixLineEndings'
     'Get-LordZAsciiBanner'
     'Get-LordZAsciiBannerRunnerLines'
     'Invoke-LordZSteamCmdScript'

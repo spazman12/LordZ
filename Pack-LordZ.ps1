@@ -15,6 +15,17 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $installRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+function Repair-LordZUnixLineEndings {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $text = [System.IO.File]::ReadAllText($Path)
+    $normalized = $text -replace "`r`n", "`n" -replace "`r", "`n"
+    if ($normalized -ne $text) {
+        $encoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($Path, $normalized, $encoding)
+    }
+}
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $installRoot 'Release'
 }
@@ -85,6 +96,10 @@ function New-LordZReleaseZip {
         }
 
         Copy-Item -LiteralPath $source -Destination $target -Force
+
+        if ($relativePath -match '\.sh$') {
+            Repair-LordZUnixLineEndings -Path $target
+        }
     }
 
     foreach ($relativePath in $commonDirs) {

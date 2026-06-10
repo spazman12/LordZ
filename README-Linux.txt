@@ -18,8 +18,12 @@ INSTALL
   1. Download LordZ-linux-*.zip from GitHub Releases
   2. unzip LordZ-linux-*.zip -d ~/LordZ
   3. cd ~/LordZ
-  4. chmod +x lordz.sh
-  5. ./lordz.sh
+  4. sed -i 's/\r$//' lordz.sh
+  5. chmod +x lordz.sh
+  6. ./lordz.sh
+
+  If you see: env: 'bash\r': No such file or directory
+  run step 4 (fixes Windows line endings in the script).
 
 FIRST-TIME SETUP
 ----------------

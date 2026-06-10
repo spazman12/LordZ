@@ -249,6 +249,81 @@ function Invoke-LordZCliDiscordRequest {
     }
 }
 
+function Receive-LordZCliDiscordUpdates {
+    param($Session)
+
+    try {
+        $updates = Get-LordZDiscordHelpChatUpdates `
+            -InstallRoot $script:InstallRoot `
+            -ThreadId $Session.ThreadId `
+            -LastMessageId $Session.LastMessageId `
+            -BotUserId $Session.BotUserId `
+            -SupportLabel $Session.SupportLabel
+
+        foreach ($update in $updates) {
+            Write-Host ''
+            Write-LordZCli ("[{0}] {1}" -f $update.Speaker, $update.Text) ([ConsoleColor]::Cyan)
+            $Session.LastMessageId = $update.MessageId
+        }
+    }
+    catch {
+        Write-Host ''
+        Write-LordZCli ("[!] Live chat poll failed: $($_.Exception.Message)") ([ConsoleColor]::DarkYellow)
+    }
+}
+
+function Read-LordZCliChatLine {
+    param(
+        [Parameter(Mandatory)][scriptblock]$OnPoll
+    )
+
+    $buffer = New-Object System.Text.StringBuilder
+    $useLiveInput = $true
+
+    try {
+        if ([Console]::IsInputRedirected) { $useLiveInput = $false }
+    }
+    catch {
+        $useLiveInput = $false
+    }
+
+    if (-not $useLiveInput) {
+        Write-Host -NoNewline '> '
+        return Read-Host
+    }
+
+    Write-Host -NoNewline '> '
+
+    while ($true) {
+        & $OnPoll
+
+        if (-not [Console]::KeyAvailable) {
+            Start-Sleep -Milliseconds 350
+            continue
+        }
+
+        $keyInfo = [Console]::ReadKey($true)
+
+        if ($keyInfo.Key -eq [ConsoleKey]::Enter) {
+            Write-Host ''
+            return $buffer.ToString()
+        }
+
+        if ($keyInfo.Key -eq [ConsoleKey]::Backspace) {
+            if ($buffer.Length -gt 0) {
+                [void]$buffer.Remove($buffer.Length - 1, 1)
+                Write-Host "`b `b" -NoNewline
+            }
+            continue
+        }
+
+        if ([char]::IsControl($keyInfo.KeyChar)) { continue }
+
+        [void]$buffer.Append($keyInfo.KeyChar)
+        Write-Host $keyInfo.KeyChar -NoNewline
+    }
+}
+
 function Invoke-LordZCliDiscordChat {
     $discord = Test-LordZDiscordConfig -InstallRoot $script:InstallRoot
     if (-not $discord.ChatConfigured) {
@@ -265,23 +340,14 @@ function Invoke-LordZCliDiscordChat {
         return
     }
 
-    Write-LordZCli "[OK] Session $($session.SessionId) - type messages, blank line + Enter to quit" ([ConsoleColor]::Green)
+    Write-LordZCli "[OK] Session $($session.SessionId) connected." ([ConsoleColor]::Green)
+    Write-LordZCli 'Discord replies appear live below. Empty line + Enter quits.' ([ConsoleColor]::DarkGray)
+
+    $pollBlock = { Receive-LordZCliDiscordUpdates -Session $session }
+    & $pollBlock
 
     while ($true) {
-        $updates = Get-LordZDiscordHelpChatUpdates `
-            -InstallRoot $script:InstallRoot `
-            -ThreadId $session.ThreadId `
-            -LastMessageId $session.LastMessageId `
-            -BotUserId $session.BotUserId `
-            -SupportLabel $session.SupportLabel
-
-        foreach ($update in $updates) {
-            Write-LordZCli ("[{0}] {1}" -f $update.Speaker, $update.Text) ([ConsoleColor]::Cyan)
-            $session.LastMessageId = $update.MessageId
-        }
-
-        Write-Host -NoNewline '> '
-        $line = Read-Host
+        $line = Read-LordZCliChatLine -OnPoll $pollBlock
         if ([string]::IsNullOrWhiteSpace($line)) { break }
 
         $send = Send-LordZDiscordHelpChatMessage `
@@ -295,7 +361,10 @@ function Invoke-LordZCliDiscordChat {
         }
         else {
             $session.LastMessageId = $send.MessageId
+            Write-LordZCli '[You] Message sent.' ([ConsoleColor]::DarkGray)
         }
+
+        & $pollBlock
     }
 }
 

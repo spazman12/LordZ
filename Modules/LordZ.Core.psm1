@@ -2073,10 +2073,6 @@ function Get-LordZDiscordHelpChatUpdates {
 
     try {
         $path = "/channels/$ThreadId/messages?limit=50"
-        if (-not [string]::IsNullOrWhiteSpace($LastMessageId)) {
-            $path = '{0}&after={1}' -f $path, $LastMessageId
-        }
-
         $messages = Invoke-LordZDiscordBotRequest `
             -BotToken $config.BotToken `
             -Method Get `
@@ -2090,12 +2086,20 @@ function Get-LordZDiscordHelpChatUpdates {
             $messages = @($messages)
         }
 
+        $lastIdNum = [uint64]0
+        if (-not [string]::IsNullOrWhiteSpace($LastMessageId)) {
+            $lastIdNum = [uint64]$LastMessageId
+        }
+
         $updates = New-Object System.Collections.Generic.List[object]
         foreach ($msg in ($messages | Sort-Object { [uint64]$_.id })) {
+            if ([uint64]$msg.id -le $lastIdNum) { continue }
             if ([string]$msg.author.id -eq $BotUserId) { continue }
 
             $text = Get-LordZDiscordMessageText -Message $msg
-            if ([string]::IsNullOrWhiteSpace($text)) { continue }
+            if ([string]::IsNullOrWhiteSpace($text)) {
+                $text = '(Support replied, but message text is empty. Enable Message Content Intent on the Discord bot.)'
+            }
 
             $displayName = if ($msg.author.global_name) { [string]$msg.author.global_name } else { [string]$msg.author.username }
             if ([string]::IsNullOrWhiteSpace($displayName)) {

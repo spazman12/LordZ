@@ -262,7 +262,13 @@ function Receive-LordZCliDiscordUpdates {
 
         foreach ($update in $updates) {
             Write-Host ''
-            Write-LordZCli ("[{0}] {1}" -f $update.Speaker, $update.Text) ([ConsoleColor]::Cyan)
+            $label = if ($update.DisplayName) {
+                ('{0} ({1})' -f $update.Speaker, $update.DisplayName)
+            }
+            else {
+                $update.Speaker
+            }
+            Write-LordZCli ("[{0}] {1}" -f $label, $update.Text) ([ConsoleColor]::Cyan)
             $Session.LastMessageId = $update.MessageId
         }
     }
@@ -274,8 +280,29 @@ function Receive-LordZCliDiscordUpdates {
 
 function Read-LordZCliChatLine {
     param(
-        [Parameter(Mandatory)][scriptblock]$OnPoll
+        [Parameter(Mandatory)][scriptblock]$OnPoll,
+        [int]$PollSeconds = 3
     )
+
+    if ((Get-LordZPlatform) -eq 'Linux' -and (Get-Command bash -ErrorAction SilentlyContinue)) {
+        while ($true) {
+            & $OnPoll
+
+            Write-Host -NoNewline '> '
+            $bashRead = 'read -t {0} -e line 2>/dev/null || true; printf "%s" "${{line:-}}"' -f $PollSeconds
+            $raw = bash -c $bashRead
+            Write-Host ''
+
+            if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+
+            $trimmed = $raw.Trim()
+            if ($trimmed -eq '/quit' -or $trimmed -eq '/exit') {
+                return ''
+            }
+
+            return $trimmed
+        }
+    }
 
     $buffer = New-Object System.Text.StringBuilder
     $useLiveInput = $true
@@ -288,6 +315,7 @@ function Read-LordZCliChatLine {
     }
 
     if (-not $useLiveInput) {
+        & $OnPoll
         Write-Host -NoNewline '> '
         return Read-Host
     }
@@ -341,7 +369,8 @@ function Invoke-LordZCliDiscordChat {
     }
 
     Write-LordZCli "[OK] Session $($session.SessionId) connected." ([ConsoleColor]::Green)
-    Write-LordZCli 'Discord replies appear live below. Empty line + Enter quits.' ([ConsoleColor]::DarkGray)
+    Write-LordZCli 'Discord replies print automatically every few seconds.' ([ConsoleColor]::DarkGray)
+    Write-LordZCli 'Type a message and press Enter to send. Type /quit to exit.' ([ConsoleColor]::DarkGray)
 
     $pollBlock = { Receive-LordZCliDiscordUpdates -Session $session }
     & $pollBlock

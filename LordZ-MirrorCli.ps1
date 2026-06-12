@@ -41,6 +41,7 @@ Folder: $script:InstallRoot
 }
 
 Import-LordZCoreModule
+Initialize-LordZDiscordConfig -InstallRoot $script:InstallRoot | Out-Null
 
 function Write-LordZCli {
     param([string]$Message, [ConsoleColor]$Color = [ConsoleColor]::Gray)

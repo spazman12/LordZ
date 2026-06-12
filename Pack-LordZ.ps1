@@ -86,8 +86,23 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-Date -Format 'yyyyMMdd'
 }
 
-$discordConfigPath = Join-Path $installRoot 'lordz.discord.json'
-$bundleDiscordConfig = Test-Path -LiteralPath $discordConfigPath
+function Get-LordZPackDiscordSourcePath {
+    param([Parameter(Mandatory)][string]$Root)
+
+    foreach ($relative in @(
+            'lordz.discord.json'
+            'Release\lordz.discord.json'
+            'Pack\lordz.discord.json'
+        )) {
+        $candidate = Join-Path $Root $relative
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+
+    return $null
+}
+
+$discordConfigPath = Get-LordZPackDiscordSourcePath -Root $installRoot
+$bundleDiscordConfig = -not [string]::IsNullOrWhiteSpace($discordConfigPath)
 
 function New-LordZReleaseZip {
     param(
@@ -182,7 +197,11 @@ Run this inside the LordZ folder first:
 
     if ($bundleDiscordConfig) {
         Copy-Item -LiteralPath $discordConfigPath -Destination (Join-Path $stageRoot 'lordz.discord.json') -Force
+        Copy-Item -LiteralPath $discordConfigPath -Destination (Join-Path $stageRoot 'lordz.discord.bundled.json') -Force
         Write-Host "[*] $TargetPlatform : bundled lordz.discord.json"
+    }
+    elseif ($TargetPlatform -eq 'Windows') {
+        throw 'Windows release requires lordz.discord.json beside Pack-LordZ.ps1 (or under Release\ or Pack\).'
     }
     else {
         Write-Host "[!] $TargetPlatform : lordz.discord.json not found - Discord may be inactive"

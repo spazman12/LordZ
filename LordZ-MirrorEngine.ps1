@@ -173,6 +173,8 @@ Import-Module (Join-Path $script:InstallRoot 'Modules\LordZ.Core.psm1') -Force
 Import-Module (Join-Path $script:InstallRoot 'Modules\LordZ.SteamAuth.psm1') -Force
 $WarningPreference = $previousWarningPreference
 
+Initialize-LordZDiscordConfig -InstallRoot $script:InstallRoot | Out-Null
+
 $script:LordZMainRunspace = [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace
 
 $script:SteamQrDebugConnected = $false
@@ -727,7 +729,13 @@ function Update-LordZDiscordPanel {
     }
 
     if ($parts.Count -eq 0) {
-        $script:LblDiscordStatus.Text = 'Discord support not bundled - download the release zip from GitHub (not git clone) for Live Help Chat'
+        $configPath = Get-LordZDiscordConfigPath -InstallRoot $script:InstallRoot
+        if (-not (Test-Path -LiteralPath $configPath)) {
+            $script:LblDiscordStatus.Text = 'Discord config missing - use the LordZ release zip from GitHub Releases (includes lordz.discord.json)'
+        }
+        else {
+            $script:LblDiscordStatus.Text = 'Discord config found but not set up - edit lordz.discord.json beside LordZ-MirrorEngine.ps1'
+        }
         $script:BtnDiscordOpen.Enabled = $false
         $script:BtnDiscordChat.Enabled = $false
         $script:BtnDiscordSend.Enabled = $false
@@ -1143,6 +1151,52 @@ function Exit-LordZWorkerRunspace {
     }
     catch {
         Write-LordZCrashLog ('Worker runspace cleanup failed: ' + $_.Exception.Message)
+    }
+    finally {
+        if ($script:LordZMainRunspace) {
+            [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace = $script:LordZMainRunspace
+        }
+    }
+}
+
+function Invoke-LordZInstallSteamCmdJob {
+    param(
+        [Parameter(Mandatory)][string]$InstallRoot
+    )
+
+    $coreModule = Join-Path $InstallRoot 'Modules\LordZ.Core.psm1'
+    $job = Start-Job -Name 'LordZSteamCmdInstall' -ScriptBlock {
+        param($Root, $ModulePath)
+        Import-Module $ModulePath -Force
+        Install-LordZSteamCmd -InstallRoot $Root -ProgressSender $null
+    } -ArgumentList $InstallRoot, $coreModule
+
+    try {
+        while ($job.State -eq 'Running') {
+            Sync-LordZPipelineLogHub
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 80
+        }
+
+        if ($job.State -eq 'Failed') {
+            $err = Receive-Job $job -ErrorAction SilentlyContinue 2>&1
+            $message = if ($err) { [string]$err } else { 'SteamCMD install job failed without details.' }
+            return [PSCustomObject]@{
+                Success      = $false
+                SteamCmdPath = (Get-LordZSteamCmdInstallPath -InstallRoot $InstallRoot)
+                Message      = $message
+            }
+        }
+
+        $result = Receive-Job $job -ErrorAction Stop | Select-Object -Last 1
+        if (-not $result) {
+            throw 'SteamCMD install ended without a result.'
+        }
+        return $result
+    }
+    finally {
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        Sync-LordZPipelineLogHub
     }
 }
 
@@ -2987,46 +3041,9 @@ $btnInstallSteamCmd.Add_Click({
     }
 
     Set-LordZBusy $true
-    $installRoot = $script:InstallRoot
 
-    $worker = New-Object System.ComponentModel.BackgroundWorker
-    [void]$worker.add_DoWork({
-        param($sender, $e)
-        $threadRunspace = $null
-        try {
-            $threadRunspace = Enter-LordZWorkerRunspace
-            $e.Result = Install-LordZSteamCmd `
-                -InstallRoot $installRoot `
-                -ProgressSender $sender
-        }
-        catch {
-            $e.Result = [PSCustomObject]@{
-                Success      = $false
-                SteamCmdPath = (Get-LordZSteamCmdInstallPath -InstallRoot $installRoot)
-                Message      = $_.Exception.Message
-            }
-        }
-        finally {
-            Exit-LordZWorkerRunspace $threadRunspace
-        }
-    })
-    Register-LordZWorkerLogging -Worker $worker
-    [void]$worker.add_RunWorkerCompleted({
-        param($sender, $e)
-        $script:SteamCmdInstallRunning = $false
-        Set-LordZBusy $false
-
-        if ($e.Error) {
-            Write-LordZLogError $e.Error.Message
-            Show-LordZMessage `
-                -Message $e.Error.Message `
-                -Title '[LORDZ] Install Failed' `
-                -Buttons ([System.Windows.Forms.MessageBoxButtons]::OK) `
-                -Icon ([System.Windows.Forms.MessageBoxIcon]::Stop) | Out-Null
-            return
-        }
-
-        $result = $e.Result
+    try {
+        $result = Invoke-LordZInstallSteamCmdJob -InstallRoot $script:InstallRoot
         if (-not $result) {
             Show-LordZMessage `
                 -Message 'SteamCMD install ended without a result. Check the Operation Log.' `
@@ -3059,8 +3076,19 @@ $btnInstallSteamCmd.Add_Click({
                 -Buttons ([System.Windows.Forms.MessageBoxButtons]::OK) `
                 -Icon ([System.Windows.Forms.MessageBoxIcon]::Stop) | Out-Null
         }
-    })
-    [void]$worker.RunWorkerAsync()
+    }
+    catch {
+        Write-LordZLogError $_.Exception.Message
+        Show-LordZMessage `
+            -Message $_.Exception.Message `
+            -Title '[LORDZ] Install Failed' `
+            -Buttons ([System.Windows.Forms.MessageBoxButtons]::OK) `
+            -Icon ([System.Windows.Forms.MessageBoxIcon]::Stop) | Out-Null
+    }
+    finally {
+        $script:SteamCmdInstallRunning = $false
+        Set-LordZBusy $false
+    }
 })
 
 $btnDiscordOpen.Add_Click({

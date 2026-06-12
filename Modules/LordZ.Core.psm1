@@ -1857,6 +1857,42 @@ function Get-LordZDiscordConfigPath {
     return Join-Path $InstallRoot 'lordz.discord.json'
 }
 
+function Initialize-LordZDiscordConfig {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+
+    $target = Get-LordZDiscordConfigPath -InstallRoot $InstallRoot
+    if (Test-Path -LiteralPath $target) { return $target }
+
+    $sources = @(
+        (Join-Path $InstallRoot 'lordz.discord.bundled.json')
+        (Join-Path $InstallRoot 'lordz.discord.example.json')
+    )
+
+    foreach ($source in $sources) {
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination $target -Force
+            return $target
+        }
+    }
+
+    return $null
+}
+
+function Get-LordZDiscordPackSourcePath {
+    param([Parameter(Mandatory)][string]$InstallRoot)
+
+    foreach ($relative in @(
+            'lordz.discord.json'
+            'Release\lordz.discord.json'
+            'Pack\lordz.discord.json'
+        )) {
+        $candidate = Join-Path $InstallRoot $relative
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+
+    return $null
+}
+
 function Get-LordZDiscordConfig {
     param([Parameter(Mandatory)][string]$InstallRoot)
 
@@ -2512,6 +2548,8 @@ Export-ModuleMember -Function @(
     'New-LordZWorkshopVdf'
     'Get-LordZDiscordConfig'
     'Get-LordZDiscordConfigPath'
+    'Initialize-LordZDiscordConfig'
+    'Get-LordZDiscordPackSourcePath'
     'Test-LordZDiscordConfig'
     'Open-LordZDiscordInvite'
     'Send-LordZDiscordHelpMessage'
